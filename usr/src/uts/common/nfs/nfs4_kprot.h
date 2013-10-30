@@ -406,6 +406,18 @@ typedef uint32_t acemask4;
 #define	ACE4_WHO_GROUP		"GROUP@"
 #define	ACE4_WHO_EVERYONE	"EVERYONE@"
 
+/*
+ * Unsupported
+ * hand modified from the checked in source.  nfs4_prot.x has NOT been updated!
+ */
+#define	ACE4_WHO_INTERACTIVE	"INTERACTIVE@"
+#define	ACE4_WHO_NETWORK	"NETWORK@"
+#define	ACE4_WHO_DIALUP		"DIALUP@"
+#define	ACE4_WHO_BATCH		"BATCH@"
+#define	ACE4_WHO_ANONYMOUS	"ANONYMOUS@"
+#define	ACE4_WHO_AUTHENTICATED	"AUTHENTICATED@"
+#define	ACE4_WHO_SERVICE	"SERVICE@"
+
 struct nfsace4 {
 	acetype4 type;
 	aceflag4 flag;
