@@ -22,6 +22,9 @@
  * Copyright 2010 Sun Microsystems, Inc.  All rights reserved.
  * Use is subject to license terms.
  */
+/*
+ * Copyright (C) 2013 Tegile Systems.  All rights reserved.
+ */
 
 /*
  * The following naming convention is used in function names.
@@ -1820,6 +1823,41 @@ ace4_to_acet(nfsace4 *nfsace4, ace_t *ace, uid_t owner, gid_t group,
 	    nfsace4->who.utf8string_val, 9) == 0)) {
 		ace->a_flags |= ACE_EVERYONE;
 		ace->a_who = 0;
+	} else if ((nfsace4->who.utf8string_len == 12) &&
+	    (bcmp(ACE4_WHO_INTERACTIVE,
+	    nfsace4->who.utf8string_val, 12) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 8) &&
+	    (bcmp(ACE4_WHO_NETWORK,
+	    nfsace4->who.utf8string_val, 8) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 7) &&
+	    (bcmp(ACE4_WHO_DIALUP,
+	    nfsace4->who.utf8string_val, 7) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 6) &&
+	    (bcmp(ACE4_WHO_BATCH,
+	    nfsace4->who.utf8string_val, 6) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 10) &&
+	    (bcmp(ACE4_WHO_ANONYMOUS,
+	    nfsace4->who.utf8string_val, 10) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 14) &&
+	    (bcmp(ACE4_WHO_AUTHENTICATED,
+	    nfsace4->who.utf8string_val, 14) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
+	} else if ((nfsace4->who.utf8string_len == 8) &&
+	    (bcmp(ACE4_WHO_SERVICE,
+	    nfsace4->who.utf8string_val, 8) == 0)) {
+	    error = NFS4ERR_BADOWNER;
+	    goto out;
 	} else if (nfsace4->flag & ACE4_IDENTIFIER_GROUP) {
 		ace->a_flags |= ACE_IDENTIFIER_GROUP;
 		error = nfs_idmap_str_gid(&nfsace4->who,
