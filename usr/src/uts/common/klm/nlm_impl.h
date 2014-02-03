@@ -529,6 +529,7 @@ void nlm_rpc_init(void);
 void nlm_rpc_cache_destroy(struct nlm_host *);
 void nlm_globals_register(struct nlm_globals *);
 void nlm_globals_unregister(struct nlm_globals *);
+void nlm_free_sysids(void);
 sysid_t nlm_sysid_alloc(void);
 
 /*

@@ -12,6 +12,7 @@
 /*
  * Copyright 2011 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright (c) 2014 Tegile Systems, Inc. All rights reserved.
  */
 
 /*
@@ -48,7 +49,13 @@ static struct modlinkage modlinkage = {
 int lm_global_nlmid = 0;
 
 /*
- * Call-back hook for clusters: Set lock manager status.
+ * Call-back hooks for sun cluster:
+ */
+
+int  (*lm_has_file_locks)(int, int) = NULL;
+void (*lm_free_nlm_sysid_table)(void) = NULL;
+
+/* Set lock manager status.
  * If this hook is set, call this instead of the ususal
  * flk_set_lockmgr_status(FLK_LOCKMGR_UP / DOWN);
  */
@@ -474,6 +481,7 @@ lm_alloc_sysidt(void)
 	return (nlm_sysid_alloc());
 }
 
+
 void
 lm_free_sysidt(sysid_t sysid)
 {
@@ -527,6 +535,18 @@ int
 lm_has_sleep(const vnode_t *vp)
 {
 	return (nlm_has_sleep(vp));
+}
+
+/*
+ * Iterate over the list of sysids, check
+ * whether a sysid holds any locks, and if not,
+ * free the sysid storage, if it does, skip.
+ */
+void
+lm_free_sysids(void *unused)
+{
+     _NOTE(ARGUNUSED(unused));
+     nlm_free_sysids();
 }
 
 /*
