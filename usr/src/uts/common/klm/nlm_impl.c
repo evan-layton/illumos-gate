@@ -28,6 +28,7 @@
 /*
  * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
  * Copyright (c) 2012 by Delphix. All rights reserved.
+ * Copyright (c) 2014 Tegile Systems, Inc. All rights reserved.
  */
 
 /*
@@ -234,6 +235,7 @@ static enum clnt_stat nlm_nsm_unmon(struct nlm_nsm *, char *);
 /*
  * NLM host functions
  */
+static void nlm_cleanup_idle_hosts(struct nlm_globals *);
 static int nlm_host_ctor(void *, void *, int);
 static void nlm_host_dtor(void *, void *);
 static void nlm_host_destroy(struct nlm_host *);
@@ -311,6 +313,16 @@ nlm_globals_unregister(struct nlm_globals *g)
 	rw_exit(&lm_lck);
 }
 
+void
+nlm_free_sysids(void)
+{
+	struct nlm_globals *g = zone_getspecific(nlm_zone_key, curzone);
+
+	mutex_enter(&g->lock);
+	nlm_cleanup_idle_hosts(g);
+	mutex_exit(&g->lock);
+}
+
 /* ARGSUSED */
 static void
 nlm_kmem_reclaim(void *cdrarg)
@@ -344,8 +356,7 @@ nlm_kmem_reclaim(void *cdrarg)
 static void
 nlm_gc(struct nlm_globals *g)
 {
-	struct nlm_host *hostp;
-	clock_t now, idle_period;
+	clock_t idle_period;
 
 	idle_period = SEC_TO_TICK(g->cn_idle_tmo);
 	mutex_enter(&g->lock);
@@ -363,125 +374,9 @@ nlm_gc(struct nlm_globals *g)
 		if (g->run_status == NLM_ST_STOPPING)
 			break;
 
-		now = ddi_get_lbolt();
-		DTRACE_PROBE2(gc__start, struct nlm_globals *, g,
-		    clock_t, now);
+		DTRACE_PROBE1(gc__start, struct nlm_globals *, g);
 
-		/*
-		 * Find all obviously unused vholds and destroy them.
-		 */
-		for (hostp = avl_first(&g->nlm_hosts_tree); hostp != NULL;
-		    hostp = AVL_NEXT(&g->nlm_hosts_tree, hostp)) {
-			struct nlm_vhold *nvp;
-
-			mutex_enter(&hostp->nh_lock);
-
-			nvp = TAILQ_FIRST(&hostp->nh_vholds_list);
-			while (nvp != NULL) {
-				struct nlm_vhold *new_nvp;
-
-				new_nvp = TAILQ_NEXT(nvp, nv_link);
-
-				/*
-				 * If these conditions are met, the vhold is
-				 * obviously unused and we will destroy it.  In
-				 * a case either v_filocks and/or v_shrlocks is
-				 * non-NULL the vhold might still be unused by
-				 * the host, but it is expensive to check that.
-				 * We defer such check until the host is idle.
-				 * The expensive check is done below without
-				 * the global lock held.
-				 */
-				if (nvp->nv_refcnt == 0 &&
-				    nvp->nv_vp->v_filocks == NULL &&
-				    nvp->nv_vp->v_shrlocks == NULL) {
-					nlm_vhold_destroy(hostp, nvp);
-				}
-
-				nvp = new_nvp;
-			}
-
-			mutex_exit(&hostp->nh_lock);
-		}
-
-		/*
-		 * Handle all hosts that are unused at the moment
-		 * until we meet one with idle timeout in future.
-		 */
-		while ((hostp = TAILQ_FIRST(&g->nlm_idle_hosts)) != NULL) {
-			bool_t has_locks;
-
-			if (hostp->nh_idle_timeout > now)
-				break;
-
-			/*
-			 * Drop global lock while doing expensive work
-			 * on this host. We'll re-check any conditions
-			 * that might change after retaking the global
-			 * lock.
-			 */
-			mutex_exit(&g->lock);
-			mutex_enter(&hostp->nh_lock);
-
-			/*
-			 * nlm_globals lock was dropped earlier because
-			 * garbage collecting of vholds and checking whether
-			 * host has any locks/shares are expensive operations.
-			 */
-			nlm_host_gc_vholds(hostp);
-			has_locks = nlm_host_has_locks(hostp);
-
-			mutex_exit(&hostp->nh_lock);
-			mutex_enter(&g->lock);
-
-			/*
-			 * While we were doing expensive operations
-			 * outside of nlm_globals critical section,
-			 * somebody could take the host and remove it
-			 * from the idle list.  Whether its been
-			 * reinserted or not, our information about
-			 * the host is outdated, and we should take no
-			 * further action.
-			 */
-			if ((hostp->nh_flags & NLM_NH_INIDLE) == 0 ||
-			    hostp->nh_idle_timeout > now)
-				continue;
-
-			/*
-			 * If the host has locks we have to renew the
-			 * host's timeout and put it at the end of LRU
-			 * list.
-			 */
-			if (has_locks) {
-				TAILQ_REMOVE(&g->nlm_idle_hosts,
-				    hostp, nh_link);
-				hostp->nh_idle_timeout = now + idle_period;
-				TAILQ_INSERT_TAIL(&g->nlm_idle_hosts,
-				    hostp, nh_link);
-				continue;
-			}
-
-			/*
-			 * We're here if all the following conditions hold:
-			 * 1) Host hasn't any locks or share reservations
-			 * 2) Host is unused
-			 * 3) Host wasn't touched by anyone at least for
-			 *    g->cn_idle_tmo seconds.
-			 *
-			 * So, now we can destroy it.
-			 */
-			nlm_host_unregister(g, hostp);
-			mutex_exit(&g->lock);
-
-			nlm_host_unmonitor(g, hostp);
-			nlm_host_destroy(hostp);
-			mutex_enter(&g->lock);
-			if (g->run_status == NLM_ST_STOPPING)
-				break;
-
-		}
-
-		DTRACE_PROBE(gc__end);
+		nlm_cleanup_idle_hosts(g);
 	}
 
 	DTRACE_PROBE1(gc__exit, struct nlm_globals *, g);
@@ -492,6 +387,134 @@ nlm_gc(struct nlm_globals *g)
 
 	cv_broadcast(&g->nlm_gc_finish_cv);
 	zthread_exit();
+}
+
+/*
+ * Garbage collect idle hosts.
+ * NOTE: g->lock has to be aquired before calling
+ * this function.
+ */
+static void
+nlm_cleanup_idle_hosts(struct nlm_globals *g)
+{
+	clock_t now;
+	struct nlm_host *hostp;
+
+	now = ddi_get_lbolt();
+	/*
+	 * Find all obviously unused vholds and destroy them.
+	 */
+	for (hostp = avl_first(&g->nlm_hosts_tree); hostp != NULL;
+	     hostp = AVL_NEXT(&g->nlm_hosts_tree, hostp)) {
+		struct nlm_vhold *nvp;
+
+		mutex_enter(&hostp->nh_lock);
+
+		nvp = TAILQ_FIRST(&hostp->nh_vholds_list);
+		while (nvp != NULL) {
+			struct nlm_vhold *new_nvp;
+
+			new_nvp = TAILQ_NEXT(nvp, nv_link);
+
+			/*
+			 * If these conditions are met, the vhold is
+			 * obviously unused and we will destroy it.  In
+			 * a case either v_filocks and/or v_shrlocks is
+			 * non-NULL the vhold might still be unused by
+			 * the host, but it is expensive to check that.
+			 * We defer such check until the host is idle.
+			 * The expensive check is done below without
+			 * the global lock held.
+			 */
+			if (nvp->nv_refcnt == 0 &&
+			    nvp->nv_vp->v_filocks == NULL &&
+			    nvp->nv_vp->v_shrlocks == NULL) {
+				nlm_vhold_destroy(hostp, nvp);
+			}
+
+			nvp = new_nvp;
+		}
+
+		mutex_exit(&hostp->nh_lock);
+	}
+
+	/*
+	 * Handle all hosts that are unused at the moment
+	 * until we meet one with idle timeout in future.
+	 */
+	while ((hostp = TAILQ_FIRST(&g->nlm_idle_hosts)) != NULL) {
+		bool_t has_locks = FALSE;
+
+		if (hostp->nh_idle_timeout > now)
+			break;
+
+		/*
+		 * Drop global lock while doing expensive work
+		 * on this host. We'll re-check any conditions
+		 * that might change after retaking the global
+		 * lock.
+		 */
+		mutex_exit(&g->lock);
+		mutex_enter(&hostp->nh_lock);
+
+		/*
+		 * nlm_globals lock was dropped earlier because
+		 * garbage collecting of vholds and checking whether
+		 * host has any locks/shares are expensive operations.
+		 */
+		nlm_host_gc_vholds(hostp);
+		has_locks = nlm_host_has_locks(hostp);
+
+		mutex_exit(&hostp->nh_lock);
+		mutex_enter(&g->lock);
+
+		/*
+		 * While we were doing expensive operations
+		 * outside of nlm_globals critical section,
+		 * somebody could take the host and remove it
+		 * from the idle list.  Whether its been
+		 * reinserted or not, our information about
+		 * the host is outdated, and we should take no
+		 * further action.
+		 */
+		if ((hostp->nh_flags & NLM_NH_INIDLE) == 0 ||
+		    hostp->nh_idle_timeout > now)
+			continue;
+
+		/*
+		 * If either host has locks or somebody has began to
+		 * use it while we were outside the nlm_globals critical
+		 * section. In both cases we have to renew host's
+		 * timeout and put it to the end of LRU list.
+		 */
+		if (has_locks || hostp->nh_refs > 0) {
+			TAILQ_REMOVE(&g->nlm_idle_hosts,
+			    hostp, nh_link);
+			hostp->nh_idle_timeout = now +
+				SEC_TO_TICK(g->cn_idle_tmo);
+			TAILQ_INSERT_TAIL(&g->nlm_idle_hosts,
+			    hostp, nh_link);
+			continue;
+		}
+
+		/*
+		 * We're here if all the following conditions hold:
+		 * 1) Host hasn't any locks or share reservations
+		 * 2) Host is unused
+		 * 3) Host wasn't touched by anyone at least for
+		 *    g->cn_idle_tmo seconds.
+		 *
+		 * So, now we can destroy it.
+		 */
+		nlm_host_unregister(g, hostp);
+		mutex_exit(&g->lock);
+
+		nlm_host_unmonitor(g, hostp);
+		nlm_host_destroy(hostp);
+		mutex_enter(&g->lock);
+		if (g->run_status == NLM_ST_STOPPING)
+			break;
+	}
 }
 
 /*
