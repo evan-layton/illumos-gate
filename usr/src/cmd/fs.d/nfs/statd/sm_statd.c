@@ -1322,7 +1322,7 @@ record_addr(char *name, sa_family_t family, struct netobj *ah)
 
 	if (family == AF_INET) {
 		if (addr.s_addr == INADDR_ANY ||
-		    ((addr.s_addr && 0xff000000) == 0)) {
+		    ((addr.s_addr & 0xff000000) == 0)) {
 			syslog(LOG_DEBUG,
 			    "record_addr: illegal IP address %x\n",
 			    addr.s_addr);
