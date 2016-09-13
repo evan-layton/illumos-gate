@@ -2502,10 +2502,12 @@ nlm_svc_stopping(struct nlm_globals *g)
 		 * list, they can not be removed from there while we're
 		 * in stopping state.
 		 */
+		mutex_enter(&g->lock);
 		while ((hostp = TAILQ_FIRST(&g->nlm_idle_hosts)) != NULL) {
 			nlm_host_unregister(g, hostp);
 			nlm_host_destroy(hostp);
 		}
+		mutex_exit(&g->lock);
 
 		if (busy_hosts > 0) {
 			/*
@@ -2518,11 +2520,12 @@ nlm_svc_stopping(struct nlm_globals *g)
 		}
 	}
 
+	mutex_enter(&g->lock);
 	ASSERT(TAILQ_EMPTY(&g->nlm_slocks));
-
 	nlm_nsm_fini(&g->nlm_nsm);
 	g->lockd_pid = 0;
 	g->run_status = NLM_ST_DOWN;
+	mutex_exit(&g->lock);
 }
 
 /*
