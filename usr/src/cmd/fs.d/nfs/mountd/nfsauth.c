@@ -20,7 +20,7 @@
  */
 
 /*
- * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Nexenta by DDN, Inc. All right reserved.
  */
 
 /*
@@ -51,6 +51,8 @@
 #include <nfs/auth.h>
 #include <sharefs/share.h>
 #include <alloca.h>
+#include <bsm/adt.h>
+#include <bsm/adt_event.h>
 #include "../lib/sharetab.h"
 #include "mountd.h"
 
@@ -99,6 +101,32 @@ nfsauth_access(auth_req *argp, auth_res *result)
 	cln_fini(&cln);
 }
 
+static int
+nfsauth_auditinfo(audit_req *argp, audit_res *result)
+{
+	adt_session_data_t *ah = NULL;
+
+	if (adt_start_session(&ah, NULL, 0)) {
+		syslog(LOG_ERR, gettext("adt_start_session: %m"));
+		return (NFSAUTH_DR_NOAUDIT);
+	}
+
+	if (adt_set_user(ah, argp->req_uid, argp->req_gid, argp->req_uid,
+	    argp->req_gid, NULL, ADT_NEW)) {
+		syslog(LOG_ERR, gettext("adt_set_user: %m"));
+		(void) adt_end_session(ah);
+		return (NFSAUTH_DR_NOAUDIT);
+	}
+
+	adt_get_auid(ah, &result->res_auid);
+	adt_get_mask(ah, &result->res_amask);
+	adt_get_asid(ah, &result->res_asid);
+
+	(void) adt_end_session(ah);
+
+	return (NFSAUTH_DR_OKAY);
+}
+
 void
 nfsauth_func(void *cookie, char *dataptr, size_t arg_size,
 	door_desc_t *dp, uint_t n_desc)
@@ -111,6 +139,7 @@ nfsauth_func(void *cookie, char *dataptr, size_t arg_size,
 	size_t		 rbsz;
 	caddr_t		 rbuf;
 	varg_t		 varg = {0};
+	uint_t		 cmd;
 
 	/*
 	 * Decode the inbound door data, so we can look at the cmd.
@@ -131,6 +160,7 @@ nfsauth_func(void *cookie, char *dataptr, size_t arg_size,
 	 */
 	switch (varg.vers) {
 	case V_PROTO:
+	case V_AUDIT:
 		ap = &varg.arg_u.arg;
 		break;
 
@@ -142,13 +172,22 @@ nfsauth_func(void *cookie, char *dataptr, size_t arg_size,
 		goto encres;
 	}
 
+	cmd = ap->cmd;
+
 	/*
 	 * Call the specified cmd
 	 */
-	switch (ap->cmd) {
+	switch (cmd) {
 	case NFSAUTH_ACCESS:
 		nfsauth_access(&ap->areq, &res.ares);
 		res.stat = NFSAUTH_DR_OKAY;
+		break;
+	case NFSAUTH_AUDITINFO:
+		if (varg.vers < V_AUDIT) {
+			res.stat = NFSAUTH_DR_BADCMD;
+			break;
+		}
+		res.stat = nfsauth_auditinfo(&ap->ureq, &res.ures);
 		break;
 	default:
 		res.stat = NFSAUTH_DR_BADCMD;
@@ -171,7 +210,7 @@ encres:
 	rbuf = alloca(rbsz);
 
 	xdrmem_create(&xdrs_r, rbuf, rbsz, XDR_ENCODE);
-	if (!xdr_nfsauth_res(&xdrs_r, &res)) {
+	if (!xdr_nfsauth_res(&xdrs_r, &res, cmd)) {
 		xdr_destroy(&xdrs_r);
 failed:
 		xdr_free(xdr_nfsauth_res, (char *)&res);

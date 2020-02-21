@@ -27,6 +27,10 @@
  */
 
 /*
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
+ */
+
+/*
  * The following naming convention is used in function names.
  *
  * If an argument is one or more aclent_t, we use "aent".
@@ -2027,7 +2031,7 @@ vs_ace4_to_acet(vsecattr_t *vs_ace4, vsecattr_t *vs_acet,
 	} else
 		vs_acet->vsa_aclentp = NULL;
 	vs_acet->vsa_aclcnt = vs_ace4->vsa_aclcnt;
-	vs_acet->vsa_mask = VSA_ACE | VSA_ACECNT;
+	vs_acet->vsa_mask = VSA_ACE | VSA_ACECNT | VSA_ACE_NOSACL;
 
 	for (i = 0; i < vs_ace4->vsa_aclcnt; i++) {
 		error = ace4_to_acet((nfsace4 *)(vs_ace4->vsa_aclentp) + i,
@@ -2184,7 +2188,7 @@ nfs4_acl_free_cache(vsecattr_t *vsap)
 
 static int
 validate_idmapping(utf8string *orig_who, uid_t *mapped_id, int isuser,
-	int isserver)
+    int isserver)
 {
 	if (u8s_mapped_to_nobody(orig_who, *mapped_id, isuser)) {
 		if (isserver) {

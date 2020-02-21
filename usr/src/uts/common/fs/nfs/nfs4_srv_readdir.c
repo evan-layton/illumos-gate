@@ -20,7 +20,7 @@
  */
 
 /*
- * Copyright 2015 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -414,8 +414,9 @@ rfs4_op_readdir(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	utf8string owner, group;
 	int owner_error, group_error;
 	struct sockaddr *ca;
-	char *name = NULL;
+	char *name = NULL, *audit_path = NULL;
 	nfsstat4 status = NFS4_OK;
+	boolean_t do_audit = B_FALSE;
 
 	DTRACE_NFSV4_2(op__readdir__start, struct compound_state *, cs,
 	    READDIR4args *, args);
@@ -462,6 +463,12 @@ rfs4_op_readdir(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 		goto out;
 	}
 
+	do_audit = nfs_audit_init(req, &audit_path, dvp);
+	if (do_audit && audit_path == NULL) {
+		*cs->statusp = resp->status = NFS4ERR_STALE;
+		do_audit = B_FALSE;
+		goto out;
+	}
 	error = VOP_ACCESS(dvp, VREAD, 0, cs->cr, NULL);
 	if (error) {
 		*cs->statusp = resp->status = puterrno4(error);
@@ -473,6 +480,7 @@ rfs4_op_readdir(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 		goto out;
 	}
 
+	nfs_audit_save();
 	/* Is there pseudo-fs work that is needed for this readdir? */
 	check_visible = PSEUDO(cs->exi) ||
 	    ! is_exported_sec(cs->nfsflavor, cs->exi) ||
@@ -633,8 +641,9 @@ readagain:
 
 	(void) VOP_RWLOCK(dvp, V_WRITELOCK_FALSE, NULL);
 
+	nfs_audit_load();
 	error = VOP_READDIR(dvp, &uio, cs->cr, &iseofdir, NULL, 0);
-
+	nfs_audit_save();
 	VOP_RWUNLOCK(dvp, V_WRITELOCK_FALSE, NULL);
 
 	if (error) {
@@ -1542,4 +1551,9 @@ out_free:
 out:
 	DTRACE_NFSV4_2(op__readdir__done, struct compound_state *, cs,
 	    READDIR4res *, resp);
+
+	if (do_audit) {
+		nfs_audit_fini(cs->cr, ACE_LIST_DIRECTORY, dvp,
+		    resp->status == NFS4_OK, NULL, audit_path);
+	}
 }

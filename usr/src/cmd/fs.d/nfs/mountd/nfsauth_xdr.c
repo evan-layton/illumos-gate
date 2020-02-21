@@ -20,7 +20,7 @@
  */
 
 /*
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Nexenta by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -40,7 +40,8 @@ xdr_varg(XDR *xdrs, varg_t *vap)
 
 	switch (vap->vers) {
 	case V_PROTO:
-		if (!xdr_nfsauth_arg(xdrs, &vap->arg_u.arg))
+	case V_AUDIT:
+		if (!xdr_nfsauth_arg(xdrs, &vap->arg_u.arg, vap->vers))
 			return (FALSE);
 		break;
 
@@ -55,43 +56,113 @@ xdr_varg(XDR *xdrs, varg_t *vap)
 }
 
 bool_t
-xdr_nfsauth_arg(XDR *xdrs, nfsauth_arg_t *argp)
+xdr_nfsauth_auditinfo_arg(XDR *xdrs, audit_req *req)
 {
-	if (!xdr_u_int(xdrs, &argp->cmd))
+	if (!xdr_uid_t(xdrs, &req->req_uid))
 		return (FALSE);
-	if (!xdr_netobj(xdrs, &argp->areq.req_client))
-		return (FALSE);
-	if (!xdr_string(xdrs, &argp->areq.req_netid, ~0))
-		return (FALSE);
-	if (!xdr_string(xdrs, &argp->areq.req_path, A_MAXPATH))
-		return (FALSE);
-	if (!xdr_int(xdrs, &argp->areq.req_flavor))
-		return (FALSE);
-	if (!xdr_uid_t(xdrs, &argp->areq.req_clnt_uid))
-		return (FALSE);
-	if (!xdr_gid_t(xdrs, &argp->areq.req_clnt_gid))
-		return (FALSE);
-	if (!xdr_array(xdrs, (caddr_t *)&argp->areq.req_clnt_gids.val,
-	    &argp->areq.req_clnt_gids.len, NGROUPS_UMAX, (uint_t)sizeof (gid_t),
-	    xdr_gid_t))
+	if (!xdr_gid_t(xdrs, &req->req_gid))
 		return (FALSE);
 	return (TRUE);
 }
 
 bool_t
-xdr_nfsauth_res(XDR *xdrs, nfsauth_res_t *argp)
+xdr_nfsauth_access_arg(XDR *xdrs, auth_req *req)
+{
+	if (!xdr_netobj(xdrs, &req->req_client))
+		return (FALSE);
+	if (!xdr_string(xdrs, &req->req_netid, ~0))
+		return (FALSE);
+	if (!xdr_string(xdrs, &req->req_path, A_MAXPATH))
+		return (FALSE);
+	if (!xdr_int(xdrs, &req->req_flavor))
+		return (FALSE);
+	if (!xdr_uid_t(xdrs, &req->req_clnt_uid))
+		return (FALSE);
+	if (!xdr_gid_t(xdrs, &req->req_clnt_gid))
+		return (FALSE);
+	if (!xdr_array(xdrs, (caddr_t *)&req->req_clnt_gids.val,
+	    &req->req_clnt_gids.len, NGROUPS_UMAX,
+	    (uint_t)sizeof (gid_t), xdr_gid_t))
+		return (FALSE);
+	return (TRUE);
+}
+
+bool_t
+xdr_nfsauth_arg(XDR *xdrs, nfsauth_arg_t *argp, vtypes type)
+{
+	if (!xdr_u_int(xdrs, &argp->cmd))
+		return (FALSE);
+
+	switch (argp->cmd) {
+	case NFSAUTH_ACCESS:
+		if (!xdr_nfsauth_access_arg(xdrs, &argp->areq))
+			return (FALSE);
+		break;
+
+	case NFSAUTH_AUDITINFO:
+		if (type < V_AUDIT ||
+		    !xdr_nfsauth_auditinfo_arg(xdrs, &argp->ureq))
+			return (FALSE);
+		break;
+
+	default:
+		argp->cmd = 0;
+		return (FALSE);
+		/* NOTREACHED */
+	}
+	return (TRUE);
+}
+
+bool_t
+xdr_nfsauth_auditinfo_res(XDR *xdrs, audit_res *res)
+{
+	if (!xdr_u_int(xdrs, &res->res_auid))
+		return (FALSE);
+	if (!xdr_u_int(xdrs, &res->res_amask.as_success))
+		return (FALSE);
+	if (!xdr_u_int(xdrs, &res->res_amask.as_failure))
+		return (FALSE);
+	if (!xdr_u_int(xdrs, &res->res_asid))
+		return (FALSE);
+	return (TRUE);
+}
+
+bool_t
+xdr_nfsauth_access_res(XDR *xdrs, auth_res *res)
+{
+	if (!xdr_int(xdrs, &res->auth_perm))
+		return (FALSE);
+	if (!xdr_uid_t(xdrs, &res->auth_srv_uid))
+		return (FALSE);
+	if (!xdr_gid_t(xdrs, &res->auth_srv_gid))
+		return (FALSE);
+	if (!xdr_array(xdrs, (caddr_t *)&res->auth_srv_gids.val,
+	    &res->auth_srv_gids.len, NGROUPS_UMAX,
+	    (uint_t)sizeof (gid_t), xdr_gid_t))
+		return (FALSE);
+	return (TRUE);
+}
+
+bool_t
+xdr_nfsauth_res(XDR *xdrs, nfsauth_res_t *argp, uint_t cmd)
 {
 	if (!xdr_u_int(xdrs, &argp->stat))
 		return (FALSE);
-	if (!xdr_int(xdrs, &argp->ares.auth_perm))
+
+	switch (cmd) {
+	case NFSAUTH_ACCESS:
+		if (!xdr_nfsauth_access_res(xdrs, &argp->ares))
+			return (FALSE);
+		break;
+
+	case NFSAUTH_AUDITINFO:
+		if (!xdr_nfsauth_auditinfo_res(xdrs, &argp->ures))
+			return (FALSE);
+		break;
+
+	default:
 		return (FALSE);
-	if (!xdr_uid_t(xdrs, &argp->ares.auth_srv_uid))
-		return (FALSE);
-	if (!xdr_gid_t(xdrs, &argp->ares.auth_srv_gid))
-		return (FALSE);
-	if (!xdr_array(xdrs, (caddr_t *)&argp->ares.auth_srv_gids.val,
-	    &argp->ares.auth_srv_gids.len, NGROUPS_UMAX, (uint_t)sizeof (gid_t),
-	    xdr_gid_t))
-		return (FALSE);
+		/* NOTREACHED */
+	}
 	return (TRUE);
 }

@@ -23,7 +23,7 @@
 # Copyright (c) 1991, 2010, Oracle and/or its affiliates. All rights reserved.
 # Copyright (c) 2011, 2014 by Delphix. All rights reserved.
 # Copyright (c) 2013 by Saso Kiselkov. All rights reserved.
-# Copyright 2018 Nexenta Systems, Inc.
+# Copyright 2019 Nexenta by DDN, Inc. All Rights Reserved.
 # Copyright 2016 Garrett D'Amore <garrett@damore.org>
 # Copyright 2020 Joyent, Inc.
 # Copyright 2016 OmniTI Computer Consulting, Inc.  All rights reserved.
@@ -1112,7 +1112,8 @@ NFSSRV_OBJS +=	nfs_server.o	nfs_srv.o	nfs3_srv.o \
 		nfs4_srv.o	nfs4_state.o	nfs4_srv_attr.o \
 		nfs4_srv_ns.o	nfs4_db.o	nfs4_srv_deleg.o \
 		nfs4_deleg_ops.o nfs4_srv_readdir.o nfs4_dispatch.o \
-		nfs4x_srv.o	nfs4x_state.o	nfs4x_dispatch.o
+		nfs4x_srv.o	nfs4x_state.o	nfs4x_dispatch.o \
+		nfs4_audit.o
 
 SMBSRV_SHARED_OBJS += \
 		smb_cfg_util.o \

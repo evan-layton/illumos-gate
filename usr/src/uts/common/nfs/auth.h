@@ -20,7 +20,7 @@
  */
 
 /*
- * Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+ * Copyright 2020 Nexenta by DDN, Inc. All rights reserved.
  */
 
 /*
@@ -92,6 +92,9 @@
 
 #ifndef _KERNEL
 #include <stddef.h>
+#include <bsm/audit.h>
+#else
+#include <c2/audit.h>
 #endif
 #include <sys/sysmacros.h>
 #include <sys/types.h>
@@ -107,6 +110,7 @@ extern "C" {
 #define	A_MAXPATH		1024
 
 #define	NFSAUTH_ACCESS		1
+#define	NFSAUTH_AUDITINFO	2
 
 #define	NFSAUTH_DENIED		0x01
 #define	NFSAUTH_RO		0x02
@@ -145,13 +149,27 @@ struct auth_res {
 };
 typedef struct auth_res auth_res;
 
+struct audit_req {
+	uid_t	 req_uid;
+	gid_t	 req_gid;
+};
+typedef struct audit_req audit_req;
+
+struct audit_res {
+	au_id_t res_auid;
+	au_mask_t res_amask;
+	au_asid_t res_asid;
+};
+typedef struct audit_res audit_res;
+
 /* --8<-- End: nfsauth_prot.x definitions --8<-- */
 
 
 #define	NFSAUTH_DR_OKAY		0x0	/* success */
-#define	NFSAUTH_DR_BADCMD	0x100	/* NFSAUTH_ACCESS is only cmd allowed */
+#define	NFSAUTH_DR_BADCMD	0x100	/* Unsupported cmd */
 #define	NFSAUTH_DR_DECERR	0x200	/* mountd could not decode arguments */
 #define	NFSAUTH_DR_EFAIL	0x400	/* mountd could not encode results */
+#define	NFSAUTH_DR_NOAUDIT	0x800	/* mountd could not get audit info */
 #define	NFSAUTH_DR_TRYCNT	5	/* door handle acquisition retry cnt */
 
 #if defined(DEBUG) && !defined(_KERNEL)
@@ -165,13 +183,20 @@ typedef struct auth_res auth_res;
  */
 struct nfsauth_arg {
 	uint_t		cmd;
-	auth_req	areq;
+	union {
+		auth_req	areq;
+		audit_req	ureq;
+	};
 };
 typedef struct nfsauth_arg nfsauth_arg_t;
 
 struct nfsauth_res {
 	uint_t		stat;
-	auth_res	ares;
+	uint_t		cmd;
+	union {
+		auth_res	ares;
+		audit_res	ures;
+	};
 };
 typedef struct nfsauth_res nfsauth_res_t;
 
@@ -182,7 +207,8 @@ typedef struct nfsauth_res nfsauth_res_t;
  */
 enum vtypes {
 	V_ERROR = 0,
-	V_PROTO = 1
+	V_PROTO = 1,
+	V_AUDIT = 2
 };
 typedef enum vtypes vtypes;
 
@@ -195,8 +221,8 @@ typedef struct varg {
 } varg_t;
 
 extern bool_t	xdr_varg(XDR *, varg_t *);
-extern bool_t	xdr_nfsauth_arg(XDR *, nfsauth_arg_t *);
-extern bool_t	xdr_nfsauth_res(XDR *, nfsauth_res_t *);
+extern bool_t	xdr_nfsauth_arg(XDR *, nfsauth_arg_t *, vtypes);
+extern bool_t	xdr_nfsauth_res(XDR *, nfsauth_res_t *, uint_t);
 
 #ifdef	__cplusplus
 }

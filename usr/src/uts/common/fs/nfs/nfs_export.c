@@ -29,7 +29,7 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.
+ * Copyright 2020 Nexenta by DDN, Inc. All Rights Reserved.
  */
 
 #include <sys/types.h>
@@ -89,7 +89,6 @@ static int	unexport(nfs_export_t *, exportinfo_t *);
 static void	exportfree(exportinfo_t *);
 static int	loadindex(exportdata_t *);
 
-extern void	nfsauth_cache_free(exportinfo_t *);
 extern int	sec_svc_loadrootnames(int, int, caddr_t **, model_t);
 extern void	sec_svc_freerootnames(int, int, caddr_t *);
 
@@ -2795,7 +2794,7 @@ exportfree(struct exportinfo *exi)
 		kmem_free(ex->ex_index, strlen(ex->ex_index) + 1);
 
 	kmem_free(ex->ex_path, ex->ex_pathlen + 1);
-	nfsauth_cache_free(exi);
+	nfsauth_cache_free(exi->exi_cache);
 
 	/*
 	 * if there is a character set mapping cached, clean it up.

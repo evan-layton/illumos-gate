@@ -2655,7 +2655,7 @@ nfs_srvfini(void)
  * These objects are also kept on a list for two reasons:
  * 1: It makes finding these in mdb _much_ easier.
  * 2: It allows operating across all zone globals for
- *    functions like nfs_auth.c:exi_cache_reclaim
+ *    functions like nfs_auth.c:nfsauth_cache_reclaim
  */
 static void *
 nfs_server_zone_init(zoneid_t zoneid)

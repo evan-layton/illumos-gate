@@ -11,7 +11,7 @@
 #
 
 #
-# Copyright 2014 Nexenta Systems, Inc.  All rights reserved.
+# Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
 #
 
 # Use distributed make (dmake) by default.
@@ -166,6 +166,8 @@ do_tags() {
 do_tar() {
 	git_rev=`git rev-parse --short=8 HEAD`
 	files="
+kernel/misc/kgssapi
+kernel/misc/$arch64/kgssapi
 usr/lib/gss/gssd
 usr/lib/gss/mech_krb5.so.1
 usr/lib/$arch64/gss/mech_krb5.so.1

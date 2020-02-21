@@ -25,7 +25,7 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  * Copyright 2020 RackTop Systems, Inc.
  */
 
@@ -912,6 +912,27 @@ rfs4_fattr4_acl(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg,
 	if (RFS4_MANDATTR_ONLY)
 		return (ENOTSUP);
 
+	/*
+	 * AUDIT-type ACEs are used in support of File-Based Access Auditing.
+	 * However, most clients do not understand AUDIT-type ACEs. Even if they
+	 * did, in SMB-land, AUDIT-type ACEs are privileged, and are stored and
+	 * modified separately from ALLOW and DENY ACEs (in the system ACL,
+	 * rather than the discretionary ACL). We also cannot tell which clients
+	 * do and do not support decoding AUDIT-type ACEs, and even if we could,
+	 * NFS does not have a privilege system like SMB does. As such, we must
+	 * hide audit-type ACEs from clients, and prevent clients from setting
+	 * them. Unfortunately, ZFS *also* stores AUDIT and non-AUDIT type ACEs
+	 * in the same ACL, and VFS does not give us an interface to set them
+	 * separately regardless, and so we follow the same strategy as SMB:
+	 * manually merge the AUDIT-type ACEs with those the client attempts to
+	 * set, and filter them out when the client requests them.
+	 * This happens in ZFS by passing the VSA_ACE_NOSACL flag.
+	 *
+	 * There's a small race condition involved with this during SET_ACL:
+	 * If ZFS reads the ACL, then someone else sets an ACL
+	 * with audit-type ACEs, those ACEs will be lost when ZFS sets the ACL.
+	 */
+
 	switch (cmd) {
 	case NFS4ATTR_SUPPORTED:
 		break;
@@ -955,7 +976,8 @@ rfs4_fattr4_acl(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg,
 		}
 
 		if (whichacl & _ACL_ACE_ENABLED)
-			vs_native.vsa_mask = VSA_ACE | VSA_ACECNT;
+			vs_native.vsa_mask = VSA_ACE | VSA_ACECNT |
+			    VSA_ACE_NOSACL;
 		else if (whichacl & _ACL_ACLENT_ENABLED)
 			vs_native.vsa_mask = VSA_ACL | VSA_ACLCNT |
 			    VSA_DFACL | VSA_DFACLCNT;

@@ -20,6 +20,7 @@
  */
 /*
  * Copyright (c) 1999, 2010, Oracle and/or its affiliates. All rights reserved.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  */
 
 #include <alloca.h>
@@ -154,10 +155,13 @@ _enum_common(const char *username,
 	userattr_t *ua;
 	int res = 0;
 	int cnt = 0;
-	char *profs[MAXPROFS];
+	char **profs = NULL;
 	kva_t *kattrs;
 
 	if (cb == NULL)
+		return (-1);
+
+	if ((profs = malloc(sizeof (*profs) * MAXPROFS)) == NULL)
 		return (-1);
 
 	ua = getusernam(username);
@@ -174,6 +178,7 @@ _enum_common(const char *username,
 		free_userattr(ua);
 		if (res != 0) {
 			free_proflist(profs, cnt);
+			free(profs);
 			return (res);
 		}
 	}
@@ -196,6 +201,7 @@ _enum_common(const char *username,
 	}
 
 	free_proflist(profs, cnt);
+	free(profs);
 
 	return (res);
 }

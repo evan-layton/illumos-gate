@@ -25,8 +25,7 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.
- * Copyright 2019 Nexenta by DDN, Inc.
+ * Copyright 2019 Nexenta by DDN, Inc. All rights reserved.
  */
 
 #ifndef _NFS4_H
@@ -1545,6 +1544,22 @@ extern void	rfs4_state_zone_init(nfs4_srv_t *);
 extern void	rfs4_state_g_fini(void);
 extern void	rfs4_state_zone_fini(void);
 extern nfs4_srv_t *nfs4_get_srv(void);
+
+/*
+ * NFSv4 auditing functions
+ */
+boolean_t nfs_audit_init(struct svc_req *req, char **path, vnode_t *vp);
+void nfs_audit_fini(cred_t *cr, uint32_t desired, vnode_t *vp,
+    boolean_t success, caller_context_t *ct, char *path);
+void nfs_audit_delete_fini(cred_t *cr, uint32_t desired, vnode_t *vp,
+    char *name, boolean_t success, caller_context_t *ct, char *path);
+boolean_t nfs_audit_rename_init(struct svc_req *req, char **src, vnode_t *vp,
+    char **dst, vnode_t *tvp, char **dpath, vnode_t *dvp);
+void nfs_audit_rename_fini(cred_t *cr, char *src, char *dest, char *dpath,
+    boolean_t success, boolean_t isdir);
+void nfs_audit_save(void);
+void nfs_audit_load(void);
+void nfs_audit_freepath(char *);
 
 #endif
 #ifdef	__cplusplus
