@@ -254,7 +254,6 @@ static SVC_CALLOUT_TABLE nfs_sct_rdma = {
  */
 nvlist_t *rfs4_dss_paths, *rfs4_dss_oldpaths;
 
-int rfs4_dispatch(struct rpcdisp *, struct svc_req *, SVCXPRT *, char *);
 bool_t rfs4_minorvers_mismatch(struct svc_req *, SVCXPRT *, void *);
 
 /*
@@ -1049,13 +1048,13 @@ static struct rpcdisp rfsdisptab_v4[] = {
 	 */
 
 	/* RFS_NULL = 0 */
-	{rpc_null,
+	{NULL,
 	    xdr_void, NULL_xdrproc_t, 0,
 	    xdr_void, NULL_xdrproc_t, 0,
 	    nullfree, RPC_IDEMPOTENT, 0},
 
 	/* RFS4_compound = 1 */
-	{rfs4_compound,
+	{NULL,
 	    xdr_COMPOUND4args_srv, NULL_xdrproc_t, sizeof (COMPOUND4args),
 	    xdr_COMPOUND4res_srv, NULL_xdrproc_t, sizeof (COMPOUND4res),
 	    rfs4_compound_free, 0, 0},

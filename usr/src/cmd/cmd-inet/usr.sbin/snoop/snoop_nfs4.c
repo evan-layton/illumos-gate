@@ -50,6 +50,9 @@
 /* use the same nfs4_prot.h as the xdr code */
 #include "rpcsvc/nfs4_prot.h"
 
+#define	r_netid na_r_netid
+#define	r_addr na_r_addr
+
 /*
  * XXX With NFS v2 and v3, we only need to xdr the pieces that we care
  * about.  Anything else we can ignore and just skip to the next packet.
