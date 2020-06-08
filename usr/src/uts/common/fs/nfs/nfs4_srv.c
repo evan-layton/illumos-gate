@@ -5922,10 +5922,10 @@ rfs4_op_write(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	*cs->statusp = resp->status = NFS4_OK;
 	resp->count = args->data_len - uio.uio_resid;
 
-	if (ioflag == 0)
-		resp->committed = UNSTABLE4;
-	else
+	if (ct.cc_flags & CC_WRITESTABLE || ioflag != 0)
 		resp->committed = FILE_SYNC4;
+	else
+		resp->committed = UNSTABLE4;
 
 	resp->writeverf = nsrv4->write4verf;
 
