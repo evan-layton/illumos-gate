@@ -1528,7 +1528,11 @@ rfs3_write(WRITE3args *args, WRITE3res *resp, struct exportinfo *exi,
 	resp->status = NFS3_OK;
 	vattr_to_wcc_data(bvap, avap, &resp->resok.file_wcc);
 	resp->resok.count = args->count - uio.uio_resid;
-	resp->resok.committed = args->stable;
+	if (ct.cc_flags & CC_WRITESTABLE) {
+		resp->resok.committed = FILE_SYNC;
+	} else {
+		resp->resok.committed = args->stable;
+	}
 	resp->resok.verf = ns->write3verf;
 	goto out;
 

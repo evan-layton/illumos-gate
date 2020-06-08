@@ -1124,8 +1124,13 @@ zfs_write(vnode_t *vp, uio_t *uio, int ioflag, cred_t *cr, caller_context_t *ct)
 	}
 
 	if (ioflag & (FSYNC | FDSYNC) ||
-	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS)
+	    zfsvfs->z_os->os_sync == ZFS_SYNC_ALWAYS) {
 		zil_commit(zilog, zp->z_id);
+
+		if (ct != NULL) {
+			ct->cc_flags |= CC_WRITESTABLE;
+		}
+	}
 
 	ZFS_EXIT(zfsvfs);
 	return (0);
