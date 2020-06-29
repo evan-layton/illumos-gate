@@ -123,8 +123,7 @@ struct sa_plugin_ops sa_plugin_ops = {
 static char *service_list_default[] =
 	{ STATD, LOCKD, MOUNTD, NFSD, NFSMAPID, RQUOTAD, REPARSED, NULL };
 static char *service_list_logging[] =
-	{ STATD, LOCKD, MOUNTD, NFSD, NFSMAPID, RQUOTAD, NFSLOGD, REPARSED,
-	    NULL };
+	{ NFSLOGD, NULL };
 
 /*
  * option definitions.  Make sure to keep the #define for the option
@@ -1791,6 +1790,8 @@ nfs_enable_share(sa_share_t share)
 	int iszfs;
 	sa_handle_t handle;
 
+	static int check_services = B_TRUE;
+
 	/* Don't drop core if the NFS module isn't loaded. */
 	(void) signal(SIGSYS, SIG_IGN);
 
@@ -1951,18 +1952,19 @@ nfs_enable_share(sa_share_t share)
 
 	if (err == SA_OK) {
 		/*
-		 * enable services as needed. This should probably be
-		 * done elsewhere in order to minimize the calls to
-		 * check services.
+		 * Enable services, if required.
+		 * This is only done the first time the function is called,
+		 * per instatiation of the library.
 		 */
+		if (check_services) {
+			_check_services(service_list_default);
+			check_services = B_FALSE;
+		}
+
 		/*
-		 * check to see if logging and other services need to
-		 * be triggered, but only if there wasn't an
-		 * error. This is probably where sharetab should be
-		 * updated with the NFS specific entry.
+		 * Enable logging.
 		 */
 		if (export.ex_flags & EX_LOG) {
-			/* enable logging */
 			if (nfslogtab_add(path, export.ex_log_buffer,
 			    export.ex_tag) != 0) {
 				(void) fprintf(stderr, dgettext(TEXT_DOMAIN,
@@ -1976,7 +1978,6 @@ nfs_enable_share(sa_share_t share)
 			 * not be thre, but that doesn't matter.
 			 */
 			(void) nfslogtab_deactivate(path);
-			_check_services(service_list_default);
 		}
 	}
 
