@@ -2402,6 +2402,11 @@ extern void	rfs_free_xuio(void *);
 
 extern time_t nfs_sys_uptime(void);
 
+char *nfs_client_name(struct svc_req *req);
+char *nfs_client_addr(struct svc_req *req, char *buf);
+char *nfs_local_addr(struct svc_req *req, char *buf);
+void decode_fh(void *fh, struct svc_req *req);
+
 #endif	/* _KERNEL */
 
 #ifdef	__cplusplus

@@ -624,6 +624,13 @@ typedef struct exp_visible exp_visible_t;
 	    (nfsauth4_access((cs)->exi, (cs)->vp, (req), (cs)->basecr, NULL, \
 	    NULL, NULL, NULL) & (NFSAUTH_RO | NFSAUTH_LIMITED)))
 
+enum fhtovp_error {
+	NOT_EXPORTED,
+	EXP_NOT_PUBLIC,
+	INVALID_LEN,
+	FAILED_TO_GET_VP
+};
+
 extern int	nfsauth4_access(struct exportinfo *, vnode_t *,
     struct svc_req *, cred_t *, uid_t *, gid_t *, uint_t *, gid_t **);
 extern int	nfsauth4_secinfo_access(struct exportinfo *,
@@ -642,7 +649,10 @@ extern int	makefh_ol(fhandle_t *, struct exportinfo *, uint_t);
 extern int	makefh3(nfs_fh3 *, struct vnode *, struct exportinfo *);
 extern int	makefh3_ol(nfs_fh3 *, struct exportinfo *, uint_t);
 extern vnode_t *nfs_fhtovp(fhandle_t *, struct exportinfo *);
-extern vnode_t *nfs3_fhtovp(nfs_fh3 *, struct exportinfo *);
+extern vnode_t *nfs3_fhtovp(nfs_fh3 *, struct exportinfo *,
+    enum fhtovp_error *reason);
+extern void prnt_estale_err_msg(char *op_name, enum fhtovp_error reason,
+    struct svc_req *req, nfs_fh3 *);
 extern struct	exportinfo *checkexport(fsid_t *, struct fid *);
 extern struct	exportinfo *checkexport4(fsid_t *, struct fid *, vnode_t *);
 extern void	exi_hold(struct exportinfo *);

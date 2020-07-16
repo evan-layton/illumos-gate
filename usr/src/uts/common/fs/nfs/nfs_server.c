@@ -190,8 +190,6 @@ static void	rfs_dispatch(struct svc_req *, SVCXPRT *);
 static void	acl_dispatch(struct svc_req *, SVCXPRT *);
 static	int	checkauth(struct exportinfo *, struct svc_req *, cred_t *, int,
 		bool_t, bool_t *);
-static char	*client_name(struct svc_req *req);
-static char	*client_addr(struct svc_req *req, char *buf);
 extern	int	sec_svc_getcred(struct svc_req *, cred_t *cr, char **, int *);
 extern	bool_t	sec_svc_inrootlist(int, caddr_t, int, caddr_t *);
 static void	*nfs_server_zone_init(zoneid_t);
@@ -1560,7 +1558,7 @@ common_dispatch(struct svc_req *req, SVCXPRT *xprt, rpcvers_t min_vers,
 			    "Failed to decode arguments for %s version %u "
 			    "procedure %s client %s%s",
 			    pgmname, vers + min_vers, procnames[which],
-			    client_name(req), client_addr(req, cbuf));
+			    nfs_client_name(req), nfs_client_addr(req, cbuf));
 			goto done;
 		}
 	}
@@ -2044,7 +2042,7 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 			cmn_err(CE_NOTE,
 			    "nfs_server: client %s%ssent NFS request from "
 			    "unprivileged port",
-			    client_name(req), client_addr(req, buf));
+			    nfs_client_name(req), nfs_client_addr(req, buf));
 			return (0);
 		}
 	}
@@ -2061,7 +2059,7 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 	if (!stat && nfsflavor != AUTH_UNIX) {
 		cmn_err(CE_NOTE,
 		    "nfs_server: couldn't get unix cred for %s",
-		    client_name(req));
+		    nfs_client_name(req));
 		return (0);
 	}
 
@@ -2186,7 +2184,7 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 		if (!secp) {
 			cmn_err(CE_NOTE, "nfs_server: client %s%shad "
 			    "no secinfo data for flavor %d",
-			    client_name(req), client_addr(req, buf),
+			    nfs_client_name(req), nfs_client_addr(req, buf),
 			    nfsflavor);
 			return (0);
 		}
@@ -2195,7 +2193,7 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 			cmn_err(CE_NOTE,
 			    "nfs_server: client %s%sused invalid "
 			    "auth window value",
-			    client_name(req), client_addr(req, buf));
+			    nfs_client_name(req), nfs_client_addr(req, buf));
 			return (0);
 		}
 
@@ -2252,7 +2250,7 @@ checkauth(struct exportinfo *exi, struct svc_req *req, cred_t *cr, int anon_ok,
 			cmn_err(CE_NOTE,
 			    "nfs_server: client %s%ssent wrong "
 			    "authentication for %s",
-			    client_name(req), client_addr(req, buf),
+			    nfs_client_name(req), nfs_client_addr(req, buf),
 			    exi->exi_export.ex_path ?
 			    exi->exi_export.ex_path : "?");
 			return (0);
@@ -2315,7 +2313,7 @@ checkauth4(struct compound_state *cs, struct svc_req *req)
 			cmn_err(CE_NOTE,
 			    "nfs_server: client %s%ssent NFSv4 request from "
 			    "unprivileged port",
-			    client_name(req), client_addr(req, buf));
+			    nfs_client_name(req), nfs_client_addr(req, buf));
 			return (0);
 		}
 	}
@@ -2423,7 +2421,7 @@ checkauth4(struct compound_state *cs, struct svc_req *req)
 		if (!secp) {
 			cmn_err(CE_NOTE, "nfs_server: client %s%shad "
 			    "no secinfo data for flavor %d",
-			    client_name(req), client_addr(req, buf),
+			    nfs_client_name(req), nfs_client_addr(req, buf),
 			    nfsflavor);
 			return (0);
 		}
@@ -2432,7 +2430,7 @@ checkauth4(struct compound_state *cs, struct svc_req *req)
 			cmn_err(CE_NOTE,
 			    "nfs_server: client %s%sused invalid "
 			    "auth window value",
-			    client_name(req), client_addr(req, buf));
+			    nfs_client_name(req), nfs_client_addr(req, buf));
 			return (0);
 		}
 
@@ -2486,7 +2484,7 @@ checkauth4(struct compound_state *cs, struct svc_req *req)
 		cmn_err(CE_NOTE,
 		    "nfs_server: client %s%ssent wrong "
 		    "authentication for %s",
-		    client_name(req), client_addr(req, buf),
+		    nfs_client_name(req), nfs_client_addr(req, buf),
 		    exi->exi_export.ex_path ?
 		    exi->exi_export.ex_path : "?");
 		return (0);
@@ -2496,8 +2494,8 @@ checkauth4(struct compound_state *cs, struct svc_req *req)
 }
 
 
-static char *
-client_name(struct svc_req *req)
+char *
+nfs_client_name(struct svc_req *req)
 {
 	char *hostname = NULL;
 
@@ -2515,18 +2513,18 @@ client_name(struct svc_req *req)
 	return (hostname);
 }
 
-static char *
-client_addr(struct svc_req *req, char *buf)
+char *
+nfs_client_addr(struct svc_req *req, char *buf)
 {
 	struct sockaddr *ca;
 	uchar_t *b;
 	char *frontspace = "";
 
 	/*
-	 * We assume we are called in tandem with client_name and the
+	 * We assume we are called in tandem with nfs_client_name and the
 	 * format string looks like "...client %s%sblah blah..."
 	 *
-	 * If it's a Unix cred then client_name returned
+	 * If it's a Unix cred then nfs_client_name returned
 	 * a host name, so we need insert a space between host name
 	 * and IP address.
 	 */
@@ -2556,6 +2554,32 @@ client_addr(struct svc_req *req, char *buf)
 		 */
 		(void) sprintf(buf, frontspace);
 	}
+
+	return (buf);
+}
+
+char *
+nfs_local_addr(struct svc_req *req, char *buf)
+{
+	struct sockaddr *ca;
+	uchar_t *b;
+
+	ca = (struct sockaddr *)(req->rq_xprt->xp_lcladdr).buf;
+
+	if (ca->sa_family == AF_INET) {
+		b = (uchar_t *)&((struct sockaddr_in *)ca)->sin_addr;
+		(void) sprintf(buf, "%d.%d.%d.%d",
+		    b[0] & 0xFF, b[1] & 0xFF, b[2] & 0xFF, b[3] & 0xFF);
+	} else if (ca->sa_family == AF_INET6) {
+		struct sockaddr_in6 *sin6;
+		sin6 = (struct sockaddr_in6 *)ca;
+		(void) kinet_ntop6((uchar_t *)&sin6->sin6_addr,
+		    buf, INET6_ADDRSTRLEN);
+	}
+	/*
+	 * We don't print anything in case if there is no IP
+	 * address to print.
+	 */
 
 	return (buf);
 }

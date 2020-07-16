@@ -108,9 +108,10 @@ rfs3_getattr(GETATTR3args *args, GETATTR3res *resp, struct exportinfo *exi,
 {
 	int error;
 	vnode_t *vp;
+	enum fhtovp_error  reason;
 	struct vattr va;
 
-	vp = nfs3_fhtovp(&args->object, exi);
+	vp = nfs3_fhtovp(&args->object, exi, &reason);
 
 	DTRACE_NFSV3_5(op__getattr__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -148,8 +149,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 GETATTR", reason,
+			    req, &args->object);
+		}
 
 	DTRACE_NFSV3_5(op__getattr__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -171,6 +176,7 @@ rfs3_setattr(SETATTR3args *args, SETATTR3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *bvap;
 	struct vattr bva;
@@ -184,7 +190,7 @@ rfs3_setattr(SETATTR3args *args, SETATTR3res *resp, struct exportinfo *exi,
 	bvap = NULL;
 	avap = NULL;
 
-	vp = nfs3_fhtovp(&args->object, exi);
+	vp = nfs3_fhtovp(&args->object, exi, &reason);
 
 	DTRACE_NFSV3_5(op__setattr__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -361,8 +367,13 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE) {
+			prnt_estale_err_msg("NFS3 SETATTR", reason,
+			    req, &args->object);
+		}
+	}
 out1:
 	DTRACE_NFSV3_5(op__setattr__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -389,6 +400,7 @@ rfs3_lookup(LOOKUP3args *args, LOOKUP3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	vnode_t *dvp;
 	struct vattr *vap;
@@ -419,7 +431,7 @@ rfs3_lookup(LOOKUP3args *args, LOOKUP3res *resp, struct exportinfo *exi,
 		    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
 		    LOOKUP3args *, args);
 	} else {
-		dvp = nfs3_fhtovp(&args->what.dir, exi);
+		dvp = nfs3_fhtovp(&args->what.dir, exi, &reason);
 
 		DTRACE_NFSV3_5(op__lookup__start, struct svc_req *, req,
 		    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -590,8 +602,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 LOOKUP", reason, req,
+			    &args->what.dir);
+		}
 out1:
 	DTRACE_NFSV3_5(op__lookup__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -619,6 +635,7 @@ rfs3_access(ACCESS3args *args, ACCESS3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -629,7 +646,7 @@ rfs3_access(ACCESS3args *args, ACCESS3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->object, exi);
+	vp = nfs3_fhtovp(&args->object, exi, &reason);
 
 	DTRACE_NFSV3_5(op__access__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -755,8 +772,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 ACCESS", reason,
+			    req, &args->object);
+		}
 	DTRACE_NFSV3_5(op__access__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
 	    ACCESS3res *, resp);
@@ -778,6 +799,7 @@ rfs3_readlink(READLINK3args *args, READLINK3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -790,7 +812,7 @@ rfs3_readlink(READLINK3args *args, READLINK3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->symlink, exi);
+	vp = nfs3_fhtovp(&args->symlink, exi, &reason);
 
 	DTRACE_NFSV3_5(op__readlink__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -929,8 +951,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 READLINK", reason,
+			    req, &args->symlink);
+	}
 out1:
 	DTRACE_NFSV3_5(op__readlink__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -965,7 +991,8 @@ rfs3_read(READ3args *args, READ3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
-	vnode_t *vp;
+	enum fhtovp_error  reason;
+	vnode_t *vp = NULL;
 	struct vattr *vap;
 	struct vattr va;
 	struct iovec iov, *iovp = NULL;
@@ -982,15 +1009,15 @@ rfs3_read(READ3args *args, READ3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->file, exi);
+	vp = nfs3_fhtovp(&args->file, exi, &reason);
 
 	DTRACE_NFSV3_5(op__read__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
 	    READ3args *, args);
 
-
 	if (vp == NULL) {
 		error = ESTALE;
+		prnt_estale_err_msg("NFS3 READ", reason, req, &args->file);
 		goto out;
 	}
 
@@ -1309,7 +1336,8 @@ rfs3_write(WRITE3args *args, WRITE3res *resp, struct exportinfo *exi,
 {
 	nfs3_srv_t *ns;
 	int error;
-	vnode_t *vp;
+	enum fhtovp_error  reason;
+	vnode_t *vp = NULL;
 	struct vattr *bvap = NULL;
 	struct vattr bva;
 	struct vattr *avap = NULL;
@@ -1326,7 +1354,7 @@ rfs3_write(WRITE3args *args, WRITE3res *resp, struct exportinfo *exi,
 	int rwlock_ret = -1;
 	caller_context_t ct;
 
-	vp = nfs3_fhtovp(&args->file, exi);
+	vp = nfs3_fhtovp(&args->file, exi, &reason);
 
 	DTRACE_NFSV3_5(op__write__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -1334,6 +1362,7 @@ rfs3_write(WRITE3args *args, WRITE3res *resp, struct exportinfo *exi,
 
 	if (vp == NULL) {
 		error = ESTALE;
+		prnt_estale_err_msg("NFS3 WRITE", reason, req, &args->file);
 		goto err;
 	}
 
@@ -1540,8 +1569,9 @@ err:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+	}
 err1:
 	vattr_to_wcc_data(bvap, avap, &resp->resfail.file_wcc);
 out:
@@ -1570,6 +1600,7 @@ rfs3_create(CREATE3args *args, CREATE3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	int in_crit = 0;
 	vnode_t *vp;
 	vnode_t *tvp = NULL;
@@ -1590,7 +1621,7 @@ rfs3_create(CREATE3args *args, CREATE3res *resp, struct exportinfo *exi,
 	dbvap = NULL;
 	davap = NULL;
 
-	dvp = nfs3_fhtovp(&args->where.dir, exi);
+	dvp = nfs3_fhtovp(&args->where.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__create__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -1904,8 +1935,13 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 CREATE", reason,
+			    req, &args->where.dir);
+		}
+
 out1:
 	DTRACE_NFSV3_5(op__create__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -1936,6 +1972,7 @@ rfs3_mkdir(MKDIR3args *args, MKDIR3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp = NULL;
 	vnode_t *dvp;
 	struct vattr *vap;
@@ -1950,7 +1987,7 @@ rfs3_mkdir(MKDIR3args *args, MKDIR3res *resp, struct exportinfo *exi,
 	dbvap = NULL;
 	davap = NULL;
 
-	dvp = nfs3_fhtovp(&args->where.dir, exi);
+	dvp = nfs3_fhtovp(&args->where.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__mkdir__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -2064,8 +2101,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 MKDIR", reason,
+			    req, &args->where.dir);
+	}
 out1:
 	DTRACE_NFSV3_5(op__mkdir__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -2087,6 +2128,7 @@ rfs3_symlink(SYMLINK3args *args, SYMLINK3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	vnode_t *dvp;
 	struct vattr *vap;
@@ -2102,7 +2144,7 @@ rfs3_symlink(SYMLINK3args *args, SYMLINK3res *resp, struct exportinfo *exi,
 	dbvap = NULL;
 	davap = NULL;
 
-	dvp = nfs3_fhtovp(&args->where.dir, exi);
+	dvp = nfs3_fhtovp(&args->where.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__symlink__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -2233,8 +2275,12 @@ err:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 SYMLINK", reason,
+			    req, &args->where.dir);
+	}
 err1:
 	vattr_to_wcc_data(dbvap, davap, &resp->resfail.dir_wcc);
 out:
@@ -2263,6 +2309,7 @@ rfs3_mknod(MKNOD3args *args, MKNOD3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	vnode_t *realvp;
 	vnode_t *dvp;
@@ -2280,7 +2327,7 @@ rfs3_mknod(MKNOD3args *args, MKNOD3res *resp, struct exportinfo *exi,
 	dbvap = NULL;
 	davap = NULL;
 
-	dvp = nfs3_fhtovp(&args->where.dir, exi);
+	dvp = nfs3_fhtovp(&args->where.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__mknod__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -2440,8 +2487,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 MKNOD", reason,
+			    req, &args->where.dir);
+	}
 out1:
 	DTRACE_NFSV3_5(op__mknod__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, dvp, struct exportinfo *, exi,
@@ -2463,6 +2514,7 @@ rfs3_remove(REMOVE3args *args, REMOVE3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error = 0;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *bvap;
 	struct vattr bva;
@@ -2475,7 +2527,7 @@ rfs3_remove(REMOVE3args *args, REMOVE3res *resp, struct exportinfo *exi,
 	bvap = NULL;
 	avap = NULL;
 
-	vp = nfs3_fhtovp(&args->object.dir, exi);
+	vp = nfs3_fhtovp(&args->object.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__remove__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -2582,8 +2634,12 @@ err:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 REMOVE", reason,
+			    req, &args->object.dir);
+	}
 err1:
 	vattr_to_wcc_data(bvap, avap, &resp->resfail.dir_wcc);
 out:
@@ -2610,6 +2666,7 @@ rfs3_rmdir(RMDIR3args *args, RMDIR3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *bvap;
 	struct vattr bva;
@@ -2621,7 +2678,7 @@ rfs3_rmdir(RMDIR3args *args, RMDIR3res *resp, struct exportinfo *exi,
 	bvap = NULL;
 	avap = NULL;
 
-	vp = nfs3_fhtovp(&args->object.dir, exi);
+	vp = nfs3_fhtovp(&args->object.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__rmdir__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -2715,8 +2772,12 @@ err:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 RMDIR", reason,
+			    req, &args->object.dir);
+	}
 err1:
 	vattr_to_wcc_data(bvap, avap, &resp->resfail.dir_wcc);
 out:
@@ -2740,6 +2801,7 @@ rfs3_rename(RENAME3args *args, RENAME3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error = 0;
+	enum fhtovp_error  reason;
 	vnode_t *fvp;
 	vnode_t *tvp;
 	vnode_t *targvp;
@@ -2765,7 +2827,7 @@ rfs3_rename(RENAME3args *args, RENAME3res *resp, struct exportinfo *exi,
 	tavap = NULL;
 	tvp = NULL;
 
-	fvp = nfs3_fhtovp(&args->from.dir, exi);
+	fvp = nfs3_fhtovp(&args->from.dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__rename__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, fvp, struct exportinfo *, exi,
@@ -2808,7 +2870,7 @@ rfs3_rename(RENAME3args *args, RENAME3res *resp, struct exportinfo *exi,
 		goto err1;
 	}
 
-	tvp = nfs3_fhtovp(&args->to.dir, exi);
+	tvp = nfs3_fhtovp(&args->to.dir, exi, &reason);
 	if (tvp == NULL) {
 		error = ESTALE;
 		goto err;
@@ -2942,6 +3004,9 @@ err:
 		resp->status = NFS3ERR_JUKEBOX;
 	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 RENAME", reason,
+			    req, &args->from.dir);
 	}
 err1:
 	vattr_to_wcc_data(fbvap, favap, &resp->resfail.fromdir_wcc);
@@ -2974,6 +3039,7 @@ rfs3_link(LINK3args *args, LINK3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	vnode_t *dvp;
 	struct vattr *vap;
@@ -2993,7 +3059,7 @@ rfs3_link(LINK3args *args, LINK3res *resp, struct exportinfo *exi,
 	avap = NULL;
 	dvp = NULL;
 
-	vp = nfs3_fhtovp(&args->file, exi);
+	vp = nfs3_fhtovp(&args->file, exi, &reason);
 
 	DTRACE_NFSV3_5(op__link__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3036,7 +3102,7 @@ rfs3_link(LINK3args *args, LINK3res *resp, struct exportinfo *exi,
 		}
 	}
 
-	dvp = nfs3_fhtovp(&args->link.dir, exi);
+	dvp = nfs3_fhtovp(&args->link.dir, exi, &reason);
 	if (dvp == NULL) {
 		error = ESTALE;
 		goto out;
@@ -3121,8 +3187,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 LINK", reason,
+			    req, &args->file);
+	}
 out1:
 	if (name != NULL && name != args->link.name)
 		kmem_free(name, MAXPATHLEN + 1);
@@ -3181,6 +3251,7 @@ rfs3_readdir(READDIR3args *args, READDIR3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -3195,7 +3266,7 @@ rfs3_readdir(READDIR3args *args, READDIR3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->dir, exi);
+	vp = nfs3_fhtovp(&args->dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__readdir__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3375,8 +3446,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 READDIR", reason,
+			    req, &args->dir);
+	}
 out1:
 	vattr_to_post_op_attr(vap, &resp->resfail.dir_attributes);
 
@@ -3442,6 +3517,7 @@ rfs3_readdirplus(READDIRPLUS3args *args, READDIRPLUS3res *resp,
     struct exportinfo *exi, struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -3470,7 +3546,7 @@ rfs3_readdirplus(READDIRPLUS3args *args, READDIRPLUS3res *resp,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->dir, exi);
+	vp = nfs3_fhtovp(&args->dir, exi, &reason);
 
 	DTRACE_NFSV3_5(op__readdirplus__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3772,6 +3848,9 @@ out:
 		resp->status = NFS3ERR_JUKEBOX;
 	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 READDIRPLUS", reason,
+			    req, &args->dir);
 	}
 out1:
 	vattr_to_post_op_attr(vap, &resp->resfail.dir_attributes);
@@ -3813,6 +3892,7 @@ rfs3_fsstat(FSSTAT3args *args, FSSTAT3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -3820,7 +3900,7 @@ rfs3_fsstat(FSSTAT3args *args, FSSTAT3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->fsroot, exi);
+	vp = nfs3_fhtovp(&args->fsroot, exi, &reason);
 
 	DTRACE_NFSV3_5(op__fsstat__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3885,8 +3965,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 FSSTAT", reason,
+			    req, &args->fsroot);
+	}
 out1:
 	DTRACE_NFSV3_5(op__fsstat__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3910,13 +3994,14 @@ rfs3_fsinfo(FSINFO3args *args, FSINFO3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	vnode_t *vp;
+	enum fhtovp_error  reason;
 	struct vattr *vap;
 	struct vattr va;
 	uint32_t xfer_size;
 	ulong_t l = 0;
 	int error;
 
-	vp = nfs3_fhtovp(&args->fsroot, exi);
+	vp = nfs3_fhtovp(&args->fsroot, exi, &reason);
 
 	DTRACE_NFSV3_5(op__fsinfo__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -3926,8 +4011,12 @@ rfs3_fsinfo(FSINFO3args *args, FSINFO3res *resp, struct exportinfo *exi,
 		if (curthread->t_flag & T_WOULDBLOCK) {
 			curthread->t_flag &= ~T_WOULDBLOCK;
 			resp->status = NFS3ERR_JUKEBOX;
-		} else
-			resp->status = NFS3ERR_STALE;
+		} else {
+			resp->status = puterrno3(error);
+			if (error == ESTALE)
+				prnt_estale_err_msg("NFS3 FSINFO", reason,
+				    req, &args->fsroot);
+		}
 		vattr_to_post_op_attr(NULL, &resp->resfail.obj_attributes);
 		goto out;
 	}
@@ -4022,6 +4111,7 @@ rfs3_pathconf(PATHCONF3args *args, PATHCONF3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *vap;
 	struct vattr va;
@@ -4029,7 +4119,7 @@ rfs3_pathconf(PATHCONF3args *args, PATHCONF3res *resp, struct exportinfo *exi,
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->object, exi);
+	vp = nfs3_fhtovp(&args->object, exi, &reason);
 
 	DTRACE_NFSV3_5(op__pathconf__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -4099,8 +4189,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 PATHCONF", reason,
+			    req, &args->object);
+	}
 out1:
 	DTRACE_NFSV3_5(op__pathconf__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -4123,6 +4217,7 @@ rfs3_commit(COMMIT3args *args, COMMIT3res *resp, struct exportinfo *exi,
 {
 	nfs3_srv_t *ns;
 	int error;
+	enum fhtovp_error  reason;
 	vnode_t *vp;
 	struct vattr *bvap;
 	struct vattr bva;
@@ -4132,7 +4227,7 @@ rfs3_commit(COMMIT3args *args, COMMIT3res *resp, struct exportinfo *exi,
 	bvap = NULL;
 	avap = NULL;
 
-	vp = nfs3_fhtovp(&args->file, exi);
+	vp = nfs3_fhtovp(&args->file, exi, &reason);
 
 	DTRACE_NFSV3_5(op__commit__start, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,
@@ -4211,8 +4306,12 @@ out:
 	if (curthread->t_flag & T_WOULDBLOCK) {
 		curthread->t_flag &= ~T_WOULDBLOCK;
 		resp->status = NFS3ERR_JUKEBOX;
-	} else
+	} else {
 		resp->status = puterrno3(error);
+		if (error == ESTALE)
+			prnt_estale_err_msg("NFS3 COMMIT", reason,
+			    req, &args->file);
+	}
 out1:
 	DTRACE_NFSV3_5(op__commit__done, struct svc_req *, req,
 	    cred_t *, cr, vnode_t *, vp, struct exportinfo *, exi,

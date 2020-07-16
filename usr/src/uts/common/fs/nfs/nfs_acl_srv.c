@@ -191,7 +191,7 @@ acl2_getacl_free(GETACL2res *resp)
 /* ARGSUSED */
 void
 acl2_setacl(SETACL2args *args, SETACL2res *resp, struct exportinfo *exi,
-	struct svc_req *req, cred_t *cr, bool_t ro)
+    struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
 	vnode_t *vp;
@@ -449,13 +449,14 @@ acl3_getacl(GETACL3args *args, GETACL3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error reason;
 	vnode_t *vp;
 	vattr_t *vap;
 	vattr_t va;
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->fh, exi);
+	vp = nfs3_fhtovp(&args->fh, exi, &reason);
 	if (vp == NULL) {
 		error = ESTALE;
 		goto out;
@@ -560,13 +561,14 @@ acl3_setacl(SETACL3args *args, SETACL3res *resp, struct exportinfo *exi,
     struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error reason;
 	vnode_t *vp;
 	vattr_t *vap;
 	vattr_t va;
 
 	vap = NULL;
 
-	vp = nfs3_fhtovp(&args->fh, exi);
+	vp = nfs3_fhtovp(&args->fh, exi, &reason);
 	if (vp == NULL) {
 		error = ESTALE;
 		goto out1;
@@ -624,10 +626,11 @@ acl3_getxattrdir(GETXATTRDIR3args *args, GETXATTRDIR3res *resp,
     struct exportinfo *exi, struct svc_req *req, cred_t *cr, bool_t ro)
 {
 	int error;
+	enum fhtovp_error reason;
 	int flags;
 	vnode_t *vp, *avp;
 
-	vp = nfs3_fhtovp(&args->fh, exi);
+	vp = nfs3_fhtovp(&args->fh, exi, &reason);
 	if (vp == NULL) {
 		resp->status = NFS3ERR_STALE;
 		return;
