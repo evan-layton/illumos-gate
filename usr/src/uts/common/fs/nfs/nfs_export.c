@@ -2580,37 +2580,45 @@ nfs_fhtovp(fhandle_t *fh, struct exportinfo *exi)
  * are done with it.
  */
 vnode_t *
-nfs3_fhtovp(nfs_fh3 *fh, struct exportinfo *exi)
+nfs3_fhtovp(nfs_fh3 *fh, struct exportinfo *exi, enum fhtovp_error *reason)
 {
 	vfs_t *vfsp;
 	vnode_t *vp;
 	int error;
 	fid_t *fidp;
 
-	if (exi == NULL)
+	if (exi == NULL) {
+		*reason = NOT_EXPORTED;
 		return (NULL);	/* not exported */
+	}
 
 	ASSERT(exi->exi_vp != NULL);
 
 	if (PUBLIC_FH3(fh)) {
-		if (exi->exi_export.ex_flags & EX_PUBLIC)
+		if (exi->exi_export.ex_flags & EX_PUBLIC) {
+			*reason = NOT_EXPORTED;
 			return (NULL);
+		}
 		vp = exi->exi_vp;
 		VN_HOLD(vp);
 		return (vp);
 	}
 
 	if (fh->fh3_length < NFS3_OLDFHSIZE ||
-	    fh->fh3_length > NFS3_MAXFHSIZE)
+	    fh->fh3_length > NFS3_MAXFHSIZE) {
+		*reason = INVALID_LEN;
 		return (NULL);
+	}
 
 	vfsp = exi->exi_vp->v_vfsp;
 	ASSERT(vfsp != NULL);
 	fidp = FH3TOFIDP(fh);
 
 	error = VFS_VGET(vfsp, &vp, fidp);
-	if (error || vp == NULL)
+	if (error || vp == NULL) {
+		*reason = FAILED_TO_GET_VP;
 		return (NULL);
+	}
 
 	return (vp);
 }
@@ -2887,6 +2895,116 @@ exi_rele(struct exportinfo *exi)
 		exportfree(exi);
 	} else
 		mutex_exit(&exi->exi_lock);
+}
+
+void
+decode_fh(void *fh, struct svc_req *req)
+{
+	nfs_fh3 *fh3;
+	nfs_fh4 *fh4;
+	nfs_fh4_fmt_t *fhp;
+	uint64_t object = 0;
+	uint64_t gen = 0;
+	int i;
+
+	if (fh) {
+		switch (req->rq_vers) {
+
+		/* We don't decode NFSv2 file handle. */
+
+		case NFS_V3:
+			fh3 = (nfs_fh3 *)fh;
+
+			/*
+			 * First 6 bytes of fh3_data is object_id and next
+			 * 4 bytes is generation number.
+			 * Get the byte ordering correct for both object_id
+			 * and generation number.
+			 */
+			for (i = 0; i < 6; i++) {
+				object |=
+				    ((uint8_t)fh3->fh3_data[i]) << (8 * i);
+			}
+
+			for (i = 0; i < 4; i++) {
+				gen |=
+				    ((uint8_t)fh3->fh3_data[i + 6]) << (8 * i);
+			}
+			cmn_err(CE_WARN, "fsid: 0x%x 0x%x inode number: %llu "
+			    "generation number: %llu\n", fh3->fh3_fsid.val[0],
+			    fh3->fh3_fsid.val[1], (unsigned long long)object,
+			    (unsigned long long)gen);
+			break;
+
+		case NFS_V4:
+			/* NFSv4 and NFSv4.1 both pass nfs_fh4 struct */
+			fh4 = (nfs_fh4 *)fh;
+			fhp = (nfs_fh4_fmt_t *)fh4->nfs_fh4_val;
+
+			for (i = 0; i < 6; i++) {
+				object |=
+				    ((uint8_t)fhp->fh4_data[i]) << (8 * i);
+			}
+
+			for (i = 0; i < 4; i++) {
+				gen |=
+				    ((uint8_t)fhp->fh4_data[i + 6]) << (8 * i);
+			}
+			cmn_err(CE_WARN, "fsid: 0x%x 0x%x inode number: "
+			    "%llu generation number: %llu\n",
+			    fhp->fh4_fsid.val[0], fhp->fh4_fsid.val[1],
+			    (unsigned long long)object,
+			    (unsigned long long)gen);
+		}
+	}
+}
+
+void prnt_estale_err_msg(char *op_name, enum fhtovp_error reason,
+    struct svc_req *req, nfs_fh3 *fh)
+{
+	char cbuf[INET6_ADDRSTRLEN];
+	char sbuf[INET6_ADDRSTRLEN];
+	char *client_addr = nfs_client_addr(req, cbuf);
+	char *srv_addr = nfs_local_addr(req, sbuf);
+	int is_unexported = 0;
+
+	switch (reason) {
+		case NOT_EXPORTED:
+			is_unexported = 1;
+			/*
+			 * Avoid spamming syslog when the export is gone
+			 */
+			break;
+
+		case EXP_NOT_PUBLIC:
+			cmn_err(CE_WARN, "%s: server %s returned ESTALE to "
+			    "client %s%s, reason: filehandle is public but "
+			    "export is not\n", op_name, srv_addr,
+			    nfs_client_name(req), client_addr);
+			break;
+
+		case INVALID_LEN:
+			cmn_err(CE_WARN, "%s: server %s returned ESTALE to "
+			    "client %s%s, reason: filehandle is of invalid "
+			    "length\n", op_name, srv_addr,
+			    nfs_client_name(req), client_addr);
+			break;
+
+		case FAILED_TO_GET_VP:
+			cmn_err(CE_WARN, "%s: server %s returned ESTALE to "
+			    "client %s%s, reason: failed to get vp for the "
+			    "given NFS filehandle\n", op_name,
+			    srv_addr, nfs_client_name(req), client_addr);
+			break;
+
+		default:
+			cmn_err(CE_WARN, "%s: server %s returned ESTALE to "
+			    "client %s%s, reason: unknown\n", op_name,
+			    srv_addr, nfs_client_name(req), client_addr);
+	}
+
+	if (!is_unexported)
+		decode_fh(fh, req);
 }
 
 #ifdef VOLATILE_FH_TEST

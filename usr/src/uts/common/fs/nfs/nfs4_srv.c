@@ -7527,6 +7527,8 @@ rfs4_op_open(nfs_argop4 *argop, nfs_resop4 *resop,
 	bool_t create;
 	bool_t replay = FALSE;
 	int can_reclaim;
+	char cbuf[INET6_ADDRSTRLEN];
+	char sbuf[INET6_ADDRSTRLEN];
 
 	DTRACE_NFSV4_2(op__open__start, struct compound_state *, cs,
 	    OPEN4args *, args);
@@ -7803,6 +7805,13 @@ out:
 
 finish:
 	*cs->statusp = resp->status;
+	if (*cs->statusp == NFS4ERR_STALE) {
+		cmn_err(CE_WARN, "OPEN: server %s returned ESTALE during a "
+		    "replay to client %s%s. The filesystem may have been "
+		    "unexported.\n", nfs_local_addr(req, sbuf),
+		    nfs_client_name(req), nfs_client_addr(req, cbuf));
+		decode_fh(&oo->ro_reply_fh, req);
+	}
 
 	rfs4_sw_exit(&oo->ro_sw);
 	rfs4_openowner_rele(oo);
