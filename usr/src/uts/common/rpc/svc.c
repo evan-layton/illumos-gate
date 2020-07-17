@@ -263,6 +263,22 @@ int    svc_default_max_same_xprt = DEFAULT_SVC_MAX_SAME_XPRT;
 int    svc_default_redline = DEFAULT_SVC_REDLINE;
 
 /*
+ * rqcred_cache entry size.
+ * Each cache entry contains:
+ * 	a. raw parameters
+ *	    (i.e., struct opaque_auth cb_cred, cb_verf in struct call_body)
+ * 	b. cooked credentials
+ *	    (cooked from raw cred (cb_cred) in function _svcauth_*)
+ * max size of opaque_auth for each raw parameter is MAX_AUTH_BYTES.
+ * cooked cred is assumed to be of max RQCRED_SIZE bytes.
+ */
+#define	RQCRED_CACHE_SZ (2 * MAX_AUTH_BYTES + RQCRED_SIZE)
+/*
+ * Authentication storage
+ */
+static kmem_cache_t *rqcred_cache;
+
+/*
  * A node for the `xprt-ready' queue.
  * See below.
  */
@@ -290,12 +306,6 @@ int rdma_check = 0;
  * This allows disabling flow control in svc_queuereq().
  */
 volatile int svc_flowcontrol_disable = 0;
-
-/*
- * Authentication parameters list.
- */
-static caddr_t rqcred_head;
-static kmutex_t rqcred_lock;
 
 /*
  * If true, then keep quiet about version mismatch.
@@ -369,6 +379,9 @@ svc_init()
 	    svc_zonefini);
 	svc_cots_init();
 	svc_clts_init();
+	rqcred_cache = kmem_cache_create("rqcred_cache",
+	    (RQCRED_CACHE_SZ), 0, NULL, NULL, NULL,
+	    NULL, NULL, 0);
 }
 
 /*
@@ -1278,21 +1291,8 @@ svc_getreq(
 	ASSERT(!is_system_labeled() || msg_getcred(mp, NULL) != NULL ||
 	    mp->b_datap->db_type != M_DATA);
 
-	/*
-	 * Firstly, allocate the authentication parameters' storage
-	 */
-	mutex_enter(&rqcred_lock);
-	if (rqcred_head) {
-		cred_area = rqcred_head;
+	cred_area = kmem_cache_alloc(rqcred_cache, KM_SLEEP);
 
-		/* LINTED pointer alignment */
-		rqcred_head = *(caddr_t *)rqcred_head;
-		mutex_exit(&rqcred_lock);
-	} else {
-		mutex_exit(&rqcred_lock);
-		cred_area = kmem_alloc(2 * MAX_AUTH_BYTES + RQCRED_SIZE,
-		    KM_SLEEP);
-	}
 	msg.rm_call.cb_cred.oa_base = cred_area;
 	msg.rm_call.cb_verf.oa_base = &(cred_area[MAX_AUTH_BYTES]);
 	r.rq_clntcred = &(cred_area[2 * MAX_AUTH_BYTES]);
@@ -1406,11 +1406,7 @@ svc_getreq(
 	/*
 	 * Free authentication parameters' storage
 	 */
-	mutex_enter(&rqcred_lock);
-	/* LINTED pointer alignment */
-	*(caddr_t *)cred_area = rqcred_head;
-	rqcred_head = cred_area;
-	mutex_exit(&rqcred_lock);
+	kmem_cache_free(rqcred_cache, cred_area);
 }
 
 /*
