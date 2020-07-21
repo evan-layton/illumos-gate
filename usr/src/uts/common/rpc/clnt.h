@@ -352,6 +352,11 @@ extern int clnt_tli_kinit(CLIENT *h, struct knetconfig *config,
 
 extern int rpc_uaddr2port(int af, char *addr);
 
+extern void clnt_init_netbuf(struct netbuf *, int);
+extern void clnt_free_netbuf(struct netbuf *);
+extern void clnt_dup_netbuf(const struct netbuf *, struct netbuf *);
+extern int clnt_cmp_netaddr(const struct netbuf *, struct netbuf *);
+
 /*
  * kRPC internal function. Not for general use. Subject to rapid change.
  */
@@ -472,6 +477,8 @@ extern void put_inet6_port(struct netbuf *, ushort_t);
 extern void put_loopback_port(struct netbuf *, char *);
 extern enum clnt_stat rpcbind_getaddr(struct knetconfig *, rpcprog_t,
     rpcvers_t, struct netbuf *);
+extern enum clnt_stat rpcbind_getaddr5(struct knetconfig *, rpcprog_t,
+    rpcvers_t, struct netbuf *, struct netbuf *);
 
 /*
  * Kstat stuff
@@ -662,6 +669,8 @@ typedef enum {
 					/* connection setup error	  */
 #define	CLSET_BINDRESVPORT	10005	/* Set preference for reserve port */
 #define	CLGET_BINDRESVPORT	10006	/* Get preference for reserve port */
+#define	CLSET_BINDSRCADDR	10007	/* Set preference for interface */
+					/* and end port */
 #endif
 
 /*

@@ -104,7 +104,7 @@ clnt_tli_kcreate(
 	case NC_TPI_CLTS:
 		RPCLOG0(8, "clnt_tli_kcreate: CLTS selected\n");
 		error = clnt_clts_kcreate(config, svcaddr, prog, vers,
-						retries, cred, &cl);
+		    retries, cred, &cl);
 		if (error != 0) {
 			RPCLOG(1,
 			"clnt_tli_kcreate: clnt_clts_kcreate failed error %d\n",
@@ -125,7 +125,7 @@ clnt_tli_kcreate(
 		if (error != 0) {
 			RPCLOG(1,
 			"clnt_tli_kcreate: clnt_cots_kcreate failed error %d\n",
-			error);
+			    error);
 			return (error);
 		}
 		break;
@@ -150,7 +150,7 @@ clnt_tli_kcreate(
 		if (error != 0) {
 			RPCLOG(1,
 			"clnt_tli_kcreate: clnt_rdma_kcreate failed error %d\n",
-			error);
+			    error);
 			return (error);
 		}
 		break;
@@ -260,20 +260,29 @@ bindresvport(
 		req->addr.len = sizeof (struct sockaddr_in);
 	}
 
-	/*
-	 * Caller wants to bind to a specific port, so don't bother with the
-	 * loop that binds to the next free one.
-	 */
+	int useresvport = 0;
 	if (addr) {
 		if (ipv6_flag) {
-			sin6->sin6_port =
-				((struct sockaddr_in6 *)addr->buf)->sin6_port;
+			bcopy(addr->buf, (char *)sin6,
+			    sizeof (struct sockaddr_in6));
+			if (sin6->sin6_port != 0) {
+				useresvport = 1;
+			}
 		} else {
-			sin->sin_port =
-				((struct sockaddr_in *)addr->buf)->sin_port;
+			bcopy(addr->buf, req->addr.buf, addr->len);
+			if (sin->sin_port != 0) {
+				useresvport = 1;
+			}
 		}
-		RPCLOG(8, "bindresvport: calling t_kbind tiptr = %p\n",
-		    (void *)tiptr);
+		req->addr.len = addr->len;
+		RPCLOG(8, "bindresvport: calling t_kbind useresvport = %d\n",
+		    useresvport);
+	}
+	/*
+	 * Caller wants o bind to a specific port, so don't bother with the
+	 * loop that binds to the next free one.
+	 */
+	if (useresvport) {
 		if ((error = t_kbind(tiptr, req, ret)) != 0) {
 			RPCLOG(1, "bindresvport: t_kbind: %d\n", error);
 			/*
@@ -284,7 +293,7 @@ bindresvport(
 			if (error == EINTR)
 				(void) t_kunbind(tiptr);
 		} else if (bcmp(req->addr.buf, ret->addr.buf,
-				ret->addr.len) != 0) {
+		    ret->addr.len) != 0) {
 			RPCLOG0(1, "bindresvport: bcmp error\n");
 			(void) t_kunbind(tiptr);
 			error = EADDRINUSE;
@@ -330,11 +339,11 @@ bindresvport_again:
 		if (!error) {
 			if (ipv6_flag) {
 				RPCLOG(8, "bindresvport: port assigned %d\n",
-					sin6->sin6_port);
+				    sin6->sin6_port);
 				*last_used = ntohs(sin6->sin6_port);
 			} else {
 				RPCLOG(8, "bindresvport: port assigned %d\n",
-					sin->sin_port);
+				    sin->sin_port);
 				*last_used = ntohs(sin->sin_port);
 			}
 		} else if (loop_twice) {
@@ -389,4 +398,70 @@ call_table_init(int size)
 	}
 
 	return (ctp);
+}
+
+/*
+ * Initialize a netbuf suitable for
+ * describing an address
+ */
+void
+clnt_init_netbuf(struct netbuf *nbuf, int len)
+{
+	nbuf->buf = kmem_zalloc(len, KM_SLEEP);
+	nbuf->maxlen = len;
+	nbuf->len = 0;
+}
+
+/*
+ * Free a netbuf
+ */
+void
+clnt_free_netbuf(struct netbuf *nbuf)
+{
+	if (nbuf == NULL || nbuf->buf == NULL) {
+#ifdef DEBUG
+		cmn_err(CE_PANIC, "Null netbuf in clnt_free_netbuf");
+#endif
+		return;
+	}
+	kmem_free(nbuf->buf, nbuf->maxlen);
+	nbuf->buf = NULL;
+	nbuf->maxlen = 0;
+	nbuf->len = 0;
+}
+
+/*
+ * Duplicate a netbuf, must be followed by a clnt_free_netbuf().
+ */
+void
+clnt_dup_netbuf(const struct netbuf *from, struct netbuf *to)
+{
+	clnt_init_netbuf(to, from->len);
+	to->len = from->len;
+
+	bcopy(from->buf, to->buf, (size_t)from->len);
+}
+
+/*
+ * Compare a netbuf.
+ */
+int
+clnt_cmp_netaddr(const struct netbuf *from, struct netbuf *to)
+{
+	if (to->len != from->len || from->len == 0)
+		return (1);
+	struct sockaddr *saddr = (struct sockaddr *)(from->buf);
+	struct sockaddr *toaddr = (struct sockaddr *)(to->buf);
+
+	if (saddr->sa_family == AF_INET && toaddr->sa_family == AF_INET) {
+		return bcmp(&((struct sockaddr_in *)from->buf)->sin_addr,
+		    &((struct sockaddr_in *)to->buf)->sin_addr,
+		    sizeof (struct in_addr));
+	} else if (saddr->sa_family == AF_INET6 &&
+	    toaddr->sa_family == AF_INET6) {
+		return bcmp(&(((struct sockaddr_in6 *)from->buf)->sin6_addr),
+		    &(((struct sockaddr_in6 *)to->buf)->sin6_addr),
+		    sizeof (struct in6_addr));
+	}
+	return (1);
 }
