@@ -83,6 +83,19 @@ typedef struct nfs4_fhandle {
 #define	LAST_NFS42_OP   OP_RECLAIM_COMPLETE
 #define	LAST_NFS4_OP    LAST_NFS42_OP
 
+extern const stateid4 nfs4_special0;
+extern const stateid4 nfs4_special1;
+extern const stateid4 nfs4_current_sid;
+extern const stateid4 nfs4_invalid_sid;
+
+#define	ISSPECIAL(id)  (stateid4_cmp(id, &nfs4_special0) || \
+			stateid4_cmp(id, &nfs4_special1) || \
+			stateid4_cmp(id, &nfs4_current_sid))
+
+#define	ISCURRENT(id)  (stateid4_cmp(id, &nfs4_current_sid))
+
+#define	ISINVALID(id)  (stateid4_cmp(id, &nfs4_invalid_sid))
+
 /*
  * Set the fattr4_change variable using a time struct. Note that change
  * is 64 bits, but timestruc_t is 128 bits in a 64-bit kernel.
@@ -968,8 +981,11 @@ extern	void		rfs4_file_rele(rfs4_file_t *);
 /* General collection of "get state" functions */
 extern	nfsstat4	rfs4_get_state(stateid4 *, rfs4_state_t **,
 					rfs4_dbsearch_type_t);
+extern	nfsstat4	rfs4_get_state_nolock(stateid4 *, rfs4_state_t **,
+					rfs4_dbsearch_type_t);
 extern	nfsstat4	rfs4_get_deleg_state(stateid4 *,
 					rfs4_deleg_state_t **);
+extern	void		rfs4_state_rele_nounlock(rfs4_state_t *);
 extern	nfsstat4	rfs4_get_lo_state(stateid4 *, rfs4_lo_state_t **,
 					bool_t);
 struct compound_state;
@@ -1222,6 +1238,8 @@ struct compound_state {
 	nfs_fh4		saved_fh;	/* ditto. valid only if */
 					/*	saved_vp != NULL */
 	struct svc_req	*req;
+	stateid4	stateid;
+	stateid4	saved_stateid;
 	char		fhbuf[NFS4_FHSIZE];
 
 	/* NFSv4.1 */
@@ -1483,7 +1501,7 @@ extern int	vn_is_nfs_reparse(vnode_t *, cred_t *);
 extern fs_locations4 *fetch_referral(vnode_t *, cred_t *);
 extern char	*build_symlink(vnode_t *, cred_t *, size_t *);
 
-extern int	stateid4_cmp(stateid4 *, stateid4 *);
+extern int	stateid4_cmp(const stateid4 *, const stateid4 *);
 
 extern vtype_t	nf4_to_vt[];
 
