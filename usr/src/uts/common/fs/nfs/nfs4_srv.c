@@ -274,6 +274,8 @@ void rfs4x_op_bind_conn_to_session(nfs_argop4 *argop, nfs_resop4 *resop,
 void rfs4x_op_secinfo_noname(nfs_argop4 *argop, nfs_resop4 *resop,
     struct svc_req *req, compound_state_t *cs);
 
+void rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
+    struct svc_req *req, compound_state_t *cs);
 static nfsstat4 check_open_access(uint32_t, struct compound_state *,
 		    struct svc_req *);
 nfsstat4	rfs4_client_sysid(rfs4_client_t *, sysid_t *);
@@ -457,7 +459,7 @@ static struct rfsv4disp rfsv4disptab[] = {
 	{rfs4x_op_destroy_session,  nullfree,  0},
 
 	/* OP_FREE_STATEID = 45 */
-	{rfs4_op_notsup,  nullfree,  0},
+	{rfs4x_op_free_stateid,  nullfree,  0},
 
 	/* OP_GET_DIR_DELEGATION = 46 */
 	{rfs4_op_notsup,  nullfree,  0},
@@ -3459,6 +3461,7 @@ rfs4_op_read(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	struct uio *uiop;
 	boolean_t do_audit = B_FALSE;
 	char *audit_path = NULL;
+	stateid4 *stateid;
 
 	DTRACE_NFSV4_2(op__read__start, struct compound_state *, cs,
 	    READ4args, args);
@@ -3473,7 +3476,17 @@ rfs4_op_read(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 		goto out;
 	}
 
-	if ((stat = rfs4_check_stateid(FREAD, vp, &args->stateid, FALSE,
+	if (ISCURRENT(&args->stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto out;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->stateid;
+	}
+
+	if ((stat = rfs4_check_stateid(FREAD, vp, stateid, FALSE,
 	    deleg, TRUE, &ct, cs)) != NFS4_OK) {
 		*cs->statusp = resp->status = stat;
 		goto out;
@@ -3807,6 +3820,7 @@ rfs4_op_putpubfh(nfs_argop4 *args, nfs_resop4 *resop, struct svc_req *req,
 		goto out;
 	}
 
+	cs->stateid = nfs4_invalid_sid;
 	*cs->statusp = resp->status = NFS4_OK;
 out:
 	DTRACE_NFSV4_2(op__putpubfh__done, struct compound_state *, cs,
@@ -3884,6 +3898,7 @@ rfs4_op_putfh(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	nfs_fh4_copy(&args->object, &cs->fh);
 	*cs->statusp = resp->status = NFS4_OK;
 	cs->deleg = FALSE;
+	cs->stateid = nfs4_invalid_sid;
 
 out:
 	DTRACE_NFSV4_2(op__putfh__done, struct compound_state *, cs,
@@ -3965,6 +3980,7 @@ rfs4_op_putrootfh(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 
 	*cs->statusp = resp->status = NFS4_OK;
 	cs->deleg = FALSE;
+	cs->stateid = nfs4_invalid_sid;
 out:
 	DTRACE_NFSV4_2(op__putrootfh__done, struct compound_state *, cs,
 	    PUTROOTFH4res *, resp);
@@ -5145,6 +5161,7 @@ rfs4_op_restorefh(nfs_argop4 *args, nfs_resop4 *resop, struct svc_req *req,
 	cs->saved_vp = NULL;
 	cs->exi = cs->saved_exi;
 	nfs_fh4_copy(&cs->saved_fh, &cs->fh);
+	cs->stateid = cs->saved_stateid;
 	*cs->statusp = resp->status = NFS4_OK;
 	cs->deleg = FALSE;
 
@@ -5181,6 +5198,7 @@ rfs4_op_savefh(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 		cs->saved_fh.nfs_fh4_val = kmem_alloc(NFS4_FHSIZE, KM_SLEEP);
 	}
 	nfs_fh4_copy(&cs->fh, &cs->saved_fh);
+	cs->saved_stateid = cs->stateid;
 	*cs->statusp = resp->status = NFS4_OK;
 
 out:
@@ -5700,6 +5718,7 @@ rfs4_op_setattr(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	bslabel_t *clabel;
 	boolean_t do_audit = B_FALSE;
 	char *audit_path = NULL;
+	stateid4 *stateid;
 
 	DTRACE_NFSV4_2(op__setattr__start, struct compound_state *, cs,
 	    SETATTR4args *, args);
@@ -5741,14 +5760,25 @@ rfs4_op_setattr(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 		}
 	}
 
+	if (ISCURRENT(&args->stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto out;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->stateid;
+	}
+
 	do_audit = nfs_audit_init(req, &audit_path, cs->vp);
 	if (do_audit && audit_path == NULL) {
 		*cs->statusp = resp->status = NFS4ERR_STALE;
 	} else {
 		*cs->statusp = resp->status =
 		    do_rfs4_op_setattr(&resp->attrsset, &args->obj_attributes,
-		    cs, &args->stateid, do_audit, audit_path);
+		    cs, stateid, do_audit, audit_path);
 	}
+
 out:
 	DTRACE_NFSV4_2(op__setattr__done, struct compound_state *, cs,
 	    SETATTR4res *, resp);
@@ -5948,6 +5978,7 @@ rfs4_op_write(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	nfs4_srv_t *nsrv4;
 	boolean_t do_audit = B_FALSE;
 	char *audit_path = NULL;
+	stateid4 *stateid;
 
 	DTRACE_NFSV4_2(op__write__start, struct compound_state *, cs,
 	    WRITE4args *, args);
@@ -5964,7 +5995,17 @@ rfs4_op_write(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 
 	cr = cs->cr;
 
-	if ((stat = rfs4_check_stateid(FWRITE, vp, &args->stateid, FALSE,
+	if (ISCURRENT(&args->stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto out;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->stateid;
+	}
+
+	if ((stat = rfs4_check_stateid(FWRITE, vp, stateid, FALSE,
 	    deleg, TRUE, &ct, cs)) != NFS4_OK) {
 		*cs->statusp = resp->status = stat;
 		goto out;
@@ -6184,6 +6225,13 @@ rfs4_compound(COMPOUND4args *args, COMPOUND4res *resp, compound_state_t *cs,
 		resp->tag.utf8string_val = NULL;
 	}
 
+	/*
+	 * Initialize current stateid to a special stateid
+	 * which means invalid, any op with this StateId
+	 * should return NFS4ERR_BAD_STATEID, reference
+	 * section 8.2.3 of RFC 5661
+	 */
+	cs->stateid = nfs4_invalid_sid;
 	cs->statusp = &resp->status;
 	cs->req = req;
 	cs->minorversion = args->minorversion;
@@ -8045,6 +8093,12 @@ out:
 			oo->ro_postpone_confirm = FALSE;
 			oo->ro_open_seqid = args->seqid;
 		}
+		if (resp->status == NFS4_OK) {
+			/*
+			 * populate cur_stateid in cs
+			 */
+			cs->stateid = resp->stateid;
+		}
 		break;
 	}
 
@@ -8198,6 +8252,7 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_state_t *sp;
 	rfs4_file_t *fp;
 	int fflags = 0;
+	stateid4 *stateid;
 
 	DTRACE_NFSV4_2(op__open__downgrade__start, struct compound_state *, cs,
 	    OPEN_DOWNGRADE4args *, args);
@@ -8212,7 +8267,17 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 		return;
 	}
 
-	status = rfs4_get_state(&args->open_stateid, &sp, RFS4_DBS_VALID);
+	if (ISCURRENT(&args->open_stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto out;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->open_stateid;
+	}
+
+	status = rfs4_get_state(stateid, &sp, RFS4_DBS_VALID);
 	if (status != NFS4_OK) {
 		*cs->statusp = resp->status = status;
 		goto out;
@@ -8228,7 +8293,7 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 	/* hold off other access to open_owner while we tinker */
 	rfs4_sw_enter(&sp->rs_owner->ro_sw);
 
-	switch (rfs4_check_stateid_seqid(sp, &args->open_stateid, cs)) {
+	switch (rfs4_check_stateid_seqid(sp, stateid, cs)) {
 	case NFS4_CHECK_STATEID_OKAY:
 		if (rfs4_check_open_seqid(args->seqid, sp->rs_owner,
 		    resop, cs) != NFS4_CHKSEQ_OKAY) {
@@ -8410,7 +8475,7 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	/* Update the stateid */
 	next_stateid(&sp->rs_stateid);
-	resp->open_stateid = sp->rs_stateid.stateid;
+	resp->open_stateid = cs->stateid = sp->rs_stateid.stateid;
 
 	rfs4_dbe_unlock(sp->rs_dbe);
 
@@ -8774,6 +8839,7 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 	CLOSE4res *resp = &resop->nfs_resop4_u.opclose;
 	rfs4_state_t *sp;
 	nfsstat4 status;
+	stateid4 *stateid;
 
 	DTRACE_NFSV4_2(op__close__start, struct compound_state *, cs,
 	    CLOSE4args *, args);
@@ -8783,7 +8849,17 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 		goto out;
 	}
 
-	status = rfs4_get_state(&args->open_stateid, &sp, RFS4_DBS_INVALID);
+	if (ISCURRENT(&args->open_stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto out;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->open_stateid;
+	}
+
+	status = rfs4_get_state(stateid, &sp, RFS4_DBS_INVALID);
 	if (status != NFS4_OK) {
 		*cs->statusp = resp->status = status;
 		goto out;
@@ -8856,7 +8932,7 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	/* Update the stateid. */
 	next_stateid(&sp->rs_stateid);
-	resp->open_stateid = sp->rs_stateid.stateid;
+	resp->open_stateid = cs->stateid = sp->rs_stateid.stateid;
 
 	rfs4_dbe_unlock(sp->rs_dbe);
 
@@ -9326,9 +9402,7 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	if (cs->vp == NULL) {
 		*cs->statusp = resp->status = NFS4ERR_NOFILEHANDLE;
-		DTRACE_NFSV4_2(op__lock__done, struct compound_state *,
-		    cs, LOCK4res *, resp);
-		return;
+		goto done;
 	}
 
 	if (args->locker.new_lock_owner) {
@@ -9343,18 +9417,14 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 			NFS4_DEBUG(rfs4_debug,
 			    (CE_NOTE, "Get state failed in lock %d", status));
 			*cs->statusp = resp->status = status;
-			DTRACE_NFSV4_2(op__lock__done, struct compound_state *,
-			    cs, LOCK4res *, resp);
-			return;
+			goto done;
 		}
 
 		/* Ensure specified filehandle matches */
 		if (cs->vp != sp->rs_finfo->rf_vp) {
 			rfs4_state_rele(sp);
 			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-			DTRACE_NFSV4_2(op__lock__done, struct compound_state *,
-			    cs, LOCK4res *, resp);
-			return;
+			goto done;
 		}
 
 		/* hold off other access to open_owner while we tinker */
@@ -9410,6 +9480,13 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 				lcreate = FALSE;
 			}
 			break;
+		}
+
+		/*
+		 * client is set only for 4.1?
+		 */
+		if(cs->client) {
+			olo->lock_owner.clientid = cs->client->rc_clientid;
 		}
 
 		lo = rfs4_findlockowner(&olo->lock_owner, &lcreate);
@@ -9517,14 +9594,24 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 
 		rfs4_lockowner_rele(lo);
 	} else {
-		stateid = &args->locker.locker4_u.lock_owner.lock_stateid;
+		if (ISCURRENT(
+		        &args->locker.locker4_u.lock_owner.lock_stateid)) {
+			if (ISSPECIAL(&cs->stateid)) {
+				*cs->statusp = resp->status =
+				                       NFS4ERR_BAD_STATEID;
+				goto done;
+			}
+			stateid = &cs->stateid;
+		} else {
+			stateid =
+			        &args->locker.locker4_u.lock_owner.lock_stateid;
+		}
+
 		/* get lsp and hold the lock on the underlying file struct */
 		if ((status = rfs4_get_lo_state(stateid, &lsp, TRUE))
 		    != NFS4_OK) {
 			*cs->statusp = resp->status = status;
-			DTRACE_NFSV4_2(op__lock__done, struct compound_state *,
-			    cs, LOCK4res *, resp);
-			return;
+			goto done;
 		}
 		create = FALSE;	/* We didn't create lsp */
 
@@ -9532,9 +9619,7 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 		if (cs->vp != lsp->rls_state->rs_finfo->rf_vp) {
 			rfs4_lo_state_rele(lsp, TRUE);
 			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-			DTRACE_NFSV4_2(op__lock__done, struct compound_state *,
-			    cs, LOCK4res *, resp);
-			return;
+			goto done;
 		}
 
 		/* hold off other access to lsp while we tinker */
@@ -9679,7 +9764,8 @@ out:
 	*cs->statusp = resp->status = status;
 
 	if (status == NFS4_OK) {
-		resp->LOCK4res_u.lock_stateid = lsp->rls_lockid.stateid;
+		resp->LOCK4res_u.lock_stateid = cs->stateid =
+		                               lsp->rls_lockid.stateid;
 		lsp->rls_lock_completed = TRUE;
 	}
 	/*
@@ -9709,6 +9795,7 @@ end:
 		rfs4_state_rele(sp);
 	}
 
+done:
 	DTRACE_NFSV4_2(op__lock__done, struct compound_state *, cs,
 	    LOCK4res *, resp);
 }
@@ -9744,7 +9831,7 @@ rfs4_op_locku(nfs_argop4 *argop, nfs_resop4 *resop,
 	LOCKU4args *args = &argop->nfs_argop4_u.oplocku;
 	LOCKU4res *resp = &resop->nfs_resop4_u.oplocku;
 	nfsstat4 status;
-	stateid4 *stateid = &args->lock_stateid;
+	stateid4 *stateid;
 	rfs4_lo_state_t *lsp;
 
 	DTRACE_NFSV4_2(op__locku__start, struct compound_state *, cs,
@@ -9752,25 +9839,29 @@ rfs4_op_locku(nfs_argop4 *argop, nfs_resop4 *resop,
 
 	if (cs->vp == NULL) {
 		*cs->statusp = resp->status = NFS4ERR_NOFILEHANDLE;
-		DTRACE_NFSV4_2(op__locku__done, struct compound_state *, cs,
-		    LOCKU4res *, resp);
-		return;
+		goto done;
+	}
+
+	if (ISCURRENT(&args->lock_stateid)) {
+		if (ISSPECIAL(&cs->stateid)) {
+			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+			goto done;
+		}
+		stateid = &cs->stateid;
+	} else {
+		stateid = &args->lock_stateid;
 	}
 
 	if ((status = rfs4_get_lo_state(stateid, &lsp, TRUE)) != NFS4_OK) {
 		*cs->statusp = resp->status = status;
-		DTRACE_NFSV4_2(op__locku__done, struct compound_state *, cs,
-		    LOCKU4res *, resp);
-		return;
+		goto done;
 	}
 
 	/* Ensure specified filehandle matches */
 	if (cs->vp != lsp->rls_state->rs_finfo->rf_vp) {
 		rfs4_lo_state_rele(lsp, TRUE);
 		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-		DTRACE_NFSV4_2(op__locku__done, struct compound_state *, cs,
-		    LOCKU4res *, resp);
-		return;
+		goto done;
 	}
 
 	/* hold off other access to lsp while we tinker */
@@ -9850,14 +9941,14 @@ out:
 	*cs->statusp = resp->status = status;
 
 	if (status == NFS4_OK)
-		resp->lock_stateid = lsp->rls_lockid.stateid;
+		cs->stateid = resp->lock_stateid = lsp->rls_lockid.stateid;
 
 	rfs4_update_lock_resp(lsp, resop);
 
 end:
 	rfs4_sw_exit(&lsp->rls_sw);
 	rfs4_lo_state_rele(lsp, TRUE);
-
+done:
 	DTRACE_NFSV4_2(op__locku__done, struct compound_state *, cs,
 	    LOCKU4res *, resp);
 }

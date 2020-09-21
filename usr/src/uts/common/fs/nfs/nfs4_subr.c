@@ -185,7 +185,7 @@ nfs4cmpfhandle(nfs4_fhandle_t *fh1, nfs4_fhandle_t *fh2)
 }
 
 int
-stateid4_cmp(stateid4 *s1, stateid4 *s2)
+stateid4_cmp(const stateid4 *s1, const stateid4 *s2)
 {
 	if (bcmp(s1, s2, sizeof (stateid4)) == 0)
 		return (1);

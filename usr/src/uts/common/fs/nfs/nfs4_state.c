@@ -49,12 +49,23 @@ extern u_longlong_t nfs4_srv_caller_id;
 
 extern uint_t nfs4_srv_vkey;
 
-stateid4 special0 = {
+/*
+ * RFC 5661: 8.2.3.  Special Stateids
+ * nfs4_special0:    indicate the absence of any OPEN state
+ *                   associated with the request.
+ * nfs4_special1:    special READ bypass stateid.
+ * nfs4_current_sid: the stateid represents the current stateid,
+                     which is whatever value is the last stateid operation.
+ * nfs4_invalid_sid: stateid represents a reserved stateid
+ *                   value defined to be invalid.
+ */
+
+const stateid4 nfs4_special0 = {
 	0,
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-stateid4 special1 = {
+const stateid4 nfs4_special1 = {
 	0xffffffff,
 	{
 		(char)0xff, (char)0xff, (char)0xff, (char)0xff,
@@ -63,9 +74,15 @@ stateid4 special1 = {
 	}
 };
 
+const stateid4 nfs4_current_sid = {
+	1,
+	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
 
-#define	ISSPECIAL(id)  (stateid4_cmp(id, &special0) || \
-			stateid4_cmp(id, &special1))
+const stateid4 nfs4_invalid_sid = {
+	0xffffffff,
+	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
+};
 
 /* For embedding the cluster nodeid into our clientid */
 #define	CLUSTER_NODEID_SHIFT	24
@@ -387,8 +404,6 @@ static void *deleg_mkkey(rfs4_entry_t);
 static uint32_t deleg_state_hash(void *);
 static bool_t deleg_state_compare(rfs4_entry_t, void *);
 static void *deleg_state_mkkey(rfs4_entry_t);
-
-static void rfs4_state_rele_nounlock(rfs4_state_t *);
 
 static int rfs4_ss_enabled = 0;
 
@@ -2992,7 +3007,7 @@ rfs4_state_destroy(rfs4_entry_t u_entry)
 	sp->rs_owner = NULL;
 }
 
-static void
+void
 rfs4_state_rele_nounlock(rfs4_state_t *sp)
 {
 	rfs4_dbe_rele(sp->rs_dbe);
@@ -3516,6 +3531,13 @@ rfs4_get_state(stateid4 *stateid, rfs4_state_t **spp,
     rfs4_dbsearch_type_t find_invalid)
 {
 	return (rfs4_get_state_lockit(stateid, spp, find_invalid, TRUE));
+}
+
+nfsstat4
+rfs4_get_state_nolock(stateid4 *stateid, rfs4_state_t **spp,
+    rfs4_dbsearch_type_t find_invalid)
+{
+	return (rfs4_get_state_lockit(stateid, spp, find_invalid, FALSE));
 }
 
 int
