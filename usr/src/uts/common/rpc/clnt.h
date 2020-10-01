@@ -24,6 +24,7 @@
  */
 /* Copyright (c) 1983, 1984, 1985, 1986, 1987, 1988, 1989 AT&T */
 /* All Rights Reserved */
+/* Copyright 2020 Tintri by DDN. All rights reserved. */
 /*
  * Portions of this source code were derived from Berkeley
  * 4.3 BSD under license from the Regents of the University of
@@ -471,6 +472,7 @@ extern int kstr_push(struct vnode *, char *);
 extern void t_kadvise(TIUSER *, uchar_t *, int);
 
 extern boolean_t connmgr_cpr_reset(void *, int);
+extern void connmgr_destroy(queue_t *);
 
 extern void put_inet_port(struct netbuf *, ushort_t);
 extern void put_inet6_port(struct netbuf *, ushort_t);
