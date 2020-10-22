@@ -525,6 +525,10 @@ struct exportinfo {
 	struct exp_hash		fid_hash;
 	struct exp_hash		path_hash;
 	struct treenode		*exi_tree;
+	fsid_t			exi_ps_fsid;		/* pseudo fsid */
+	struct fid		exi_ps_fid;		/* pseudo fid */
+	u_longlong_t		exi_ps_ino;		/* pseudo inode no */
+	struct exp_hash		ps_fid_hash;		/* pseudo fid hash */
 	fhandle_t		exi_fh;
 	krwlock_t		exi_cache_lock;
 	kmutex_t		exi_lock;
@@ -587,7 +591,9 @@ typedef struct secinfo secinfo_t;
 struct exp_visible {
 	vnode_t			*vis_vp;
 	fid_t			vis_fid;
+	fid_t			vis_ps_fid;
 	u_longlong_t		vis_ino;
+	u_longlong_t		vis_ps_ino;
 	int			vis_count;
 	int			vis_exported;
 	struct exp_visible	*vis_next;
@@ -611,6 +617,9 @@ typedef struct exp_visible exp_visible_t;
 
 #define	exportmatch(exi, fsid, fid)	\
 	(EQFSID(&(exi)->exi_fsid, (fsid)) && EQFID(&(exi)->exi_fid, (fid)))
+#define	ps_exportmatch(exi, fsid, fid)	\
+	(EQFSID(&(exi)->exi_ps_fsid, (fsid)) && EQFID(&(exi)->exi_ps_fid, \
+	(fid)))
 
 /*
  * Returns true iff exported filesystem is read-only to the given host.
@@ -676,6 +685,8 @@ typedef struct nfs_export {
 
 	struct exportinfo *exptable_path_hash[PKP_HASH_SIZE];
 	struct exportinfo *exptable[EXPTABLESIZE];
+	/* hash table with pseudo fsid/fid */
+	struct exportinfo *ps_exptable[EXPTABLESIZE];
 
 	/*
 	 * Read/Write lock that protects the exportinfo list.  This lock
@@ -748,6 +759,7 @@ extern int exi_id_get_next(void);
 
 extern int	makefh4(nfs_fh4 *, struct vnode *, struct exportinfo *);
 extern vnode_t *nfs4_fhtovp(nfs_fh4 *, struct exportinfo *, nfsstat4 *);
+void gen_pseudo_fid(char *path, fid_t *fid, u_longlong_t *ps_ino);
 
 #endif /* _KERNEL */
 

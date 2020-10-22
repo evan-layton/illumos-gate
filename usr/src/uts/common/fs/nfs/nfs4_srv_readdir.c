@@ -970,6 +970,11 @@ reencode_attrs:
 						pmaj[0] = exi->exi_fsid.val[0];
 						pmaj[1] = exi->exi_fsid.val[1];
 						minor = 0;
+					} else if (PSEUDO(exi)) {
+						major = (uint64_t)exi
+						    ->exi_ps_fsid.val[0];
+						minor = (uint64_t)exi
+						    ->exi_ps_fsid.val[1];
 					} else {
 						major = getmajor(va.va_fsid);
 						minor = getminor(va.va_fsid);
@@ -1077,7 +1082,16 @@ reencode_attrs:
 					}
 				}
 				if (ae & FATTR4_FILEID_MASK) {
-					IXDR_PUT_HYPER(ptr, va.va_nodeid);
+					u_longlong_t	ps_ino;
+
+					ps_ino = va.va_nodeid;
+					if (check_visible &&
+					    (dvp->v_vfsp ==
+					    visp->vis_vp->v_vfsp))
+						gen_pseudo_fid(visp->
+						    vis_vp->v_path,
+						    NULL, &ps_ino);
+					IXDR_PUT_HYPER(ptr, ps_ino);
 				}
 				/* Check the redzone boundary */
 				if (ptr > ptr_redzone) {
@@ -1440,7 +1454,17 @@ reencode_attrs:
 					ASSERT(0);
 				}
 				if (ae & FATTR4_MOUNTED_ON_FILEID_MASK) {
-					IXDR_PUT_HYPER(ptr, dp->d_ino);
+					u_longlong_t	ps_ino;
+
+					ps_ino = dp->d_ino;
+					if (check_visible &&
+					    (dvp->v_vfsp ==
+					    visp->vis_vp->v_vfsp))
+						gen_pseudo_fid(visp->
+						    vis_vp->v_path,
+						    NULL, &ps_ino);
+
+					IXDR_PUT_HYPER(ptr, ps_ino);
 				}
 				/* Check the redzone boundary */
 				if (ptr > ptr_redzone) {

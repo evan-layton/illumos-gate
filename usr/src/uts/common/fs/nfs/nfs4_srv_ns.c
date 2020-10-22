@@ -36,6 +36,12 @@
 #include <sys/avl.h>
 
 #define	PSEUDOFS_SUFFIX		" (pseudo)"
+/*
+ * From SHORT_FID_LEN in <sys/zfs_vfsops.h>
+ */
+#define	NFS_PSEUDO_SHORT_FID_LEN 10
+static fsid_t pseudo_fsid = {{0x7F7F7F7F, 0x7FABCDEF}};
+static int dbg_pseudo_fid;
 
 /*
  * A version of VOP_FID that deals with a remote VOP_FID for nfs.
@@ -99,7 +105,7 @@ nfs4_vget_pseudo(struct exportinfo *exi, vnode_t **vpp, fid_t *fidp)
 	/* check if the given fid is in the visible list */
 
 	for (visp = exi->exi_visible; visp; visp = visp->vis_next) {
-		if (EQFID(fidp, &visp->vis_fid)) {
+		if (EQFID(fidp, &visp->vis_ps_fid)) {
 			VN_HOLD(visp->vis_vp);
 			*vpp = visp->vis_vp;
 			return (0);
@@ -107,20 +113,47 @@ nfs4_vget_pseudo(struct exportinfo *exi, vnode_t **vpp, fid_t *fidp)
 	}
 
 	/* check if the given fid is the same as the exported node */
-
-	bzero(&exp_fid, sizeof (exp_fid));
-	exp_fid.fid_len = MAXFIDSZ;
-	error = vop_fid_pseudo(exi->exi_vp, &exp_fid);
-	if (error)
-		return (error);
-
-	if (EQFID(fidp, &exp_fid)) {
+	if (EQFID(fidp, &exi->exi_ps_fid)) {
 		VN_HOLD(exi->exi_vp);
 		*vpp = exi->exi_vp;
 		return (0);
 	}
 
 	return (ENOENT);
+}
+
+/*
+ * This hashing algo was chosen base on following data points
+ * 1. Complete linux directory tree pathnames had less than .1% collisions.
+ * 2. Collected share names from intellicare which are ~26000,
+ *    no collisons were detected among these names.
+ */
+void
+gen_pseudo_fid(char *path, fid_t *ps_fid, u_longlong_t *ps_ino)
+{
+	int c, i;
+	char *str = path;
+
+	/*
+	 * djb2 hashing algo from http://www.cse.yorku.ca/~oz/hash.html
+	 */
+	uint64_t inode = 5381;
+	while ((c = *str++) != '\0')
+		inode = ((inode << 5) + inode) + c; /* hash * 33 + c */
+
+	if (ps_fid) {
+		ps_fid->fid_len = NFS_PSEUDO_SHORT_FID_LEN;
+
+		for (i = 0; i < ps_fid->fid_len; i++)
+			ps_fid->fid_data[i] = inode >> (8*i);
+	}
+
+	if (ps_ino)
+		*ps_ino = (u_longlong_t)inode;
+
+	if (dbg_pseudo_fid != 0)
+		cmn_err(CE_NOTE, "Pseudo FileId for %s is 0x%"PRIx64"",
+		    path, inode);
 }
 
 /*
@@ -169,15 +202,27 @@ pseudo_exportfs(nfs_export_t *ne, vnode_t *vp, fid_t *fid,
 	exi->exi_volatile_dev = (vfssw[vp->v_vfsp->vfs_fstype].vsw_flag &
 	    VSW_VOLATILEDEV) ? 1 : 0;
 	mutex_init(&exi->exi_lock, NULL, MUTEX_DEFAULT, NULL);
+	/*
+	 * Add the code to populate tfsid and tfid here.
+	 * A function which will read the file with information of
+	 * translated fsid/fid.
+	 */
+	exi->exi_ps_fsid = pseudo_fsid;
+
+	/*
+	 * Generate 64 bit FileId from path and copy it to
+	 * ps_ino along with exi_ps_fid.
+	 */
+	gen_pseudo_fid(vp->v_path, &exi->exi_ps_fid, &exi->exi_ps_ino);
 
 	/*
 	 * Build up the template fhandle
 	 */
-	exi->exi_fh.fh_fsid = fsid;
-	ASSERT(exi->exi_fid.fid_len <= sizeof (exi->exi_fh.fh_xdata));
-	exi->exi_fh.fh_xlen = exi->exi_fid.fid_len;
-	bcopy(exi->exi_fid.fid_data, exi->exi_fh.fh_xdata,
-	    exi->exi_fid.fid_len);
+	exi->exi_fh.fh_fsid = exi->exi_ps_fsid;
+	ASSERT(exi->exi_ps_fid.fid_len <= sizeof (exi->exi_fh.fh_xdata));
+	exi->exi_fh.fh_xlen = exi->exi_ps_fid.fid_len;
+	bcopy(exi->exi_ps_fid.fid_data, exi->exi_fh.fh_xdata,
+	    exi->exi_ps_fid.fid_len);
 	exi->exi_fh.fh_len = sizeof (exi->exi_fh.fh_data);
 
 	kex = &exi->exi_export;
@@ -741,6 +786,10 @@ treeclimb_export(struct exportinfo *exip)
 		VN_HOLD(vp);
 		visp->vis_vp = vp;
 		visp->vis_fid = fid;		/* structure copy */
+		gen_pseudo_fid(vp->v_path, &visp->vis_ps_fid,
+		    &visp->vis_ps_ino);
+		cmn_err(CE_NOTE, "Pseudo FileId for %s is 0x%llx", vp->v_path,
+		    visp->vis_ps_ino);
 		visp->vis_ino = va.va_nodeid;
 		visp->vis_count = 1;
 		visp->vis_exported = exportdir;

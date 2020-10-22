@@ -1304,6 +1304,9 @@ rfs4_fattr4_fileid(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg,
 		}
 		ASSERT(sarg->vap->va_mask & AT_NODEID);
 		na->fileid = sarg->vap->va_nodeid;
+		if (PSEUDO(sarg->cs->exi))
+			gen_pseudo_fid(sarg->cs->vp->v_path, NULL,
+			    (u_longlong_t *)&na->fileid);
 		break;
 	case NFS4ATTR_SETIT:
 		/*
@@ -1311,11 +1314,17 @@ rfs4_fattr4_fileid(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg,
 		 */
 		error = EINVAL;
 		break;
-	case NFS4ATTR_VERIT:
+	case NFS4ATTR_VERIT: {
+		u_longlong_t	ps_ino;
 		ASSERT(sarg->vap->va_mask & AT_NODEID);
-		if (sarg->vap->va_nodeid != na->fileid)
+		ps_ino =  na->fileid;
+		if (PSEUDO(sarg->cs->exi))
+			gen_pseudo_fid(sarg->cs->vp->v_path, NULL, &ps_ino);
+
+		if (sarg->vap->va_nodeid != ps_ino)
 			error = -1;	/* no match */
 		break;
+	}
 	case NFS4ATTR_FREEIT:
 		break;
 	}
@@ -1329,6 +1338,8 @@ rfs4_get_mntdfileid(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg)
 	int error = 0;
 	vattr_t	*vap, va;
 	vnode_t *stubvp = NULL, *vp;
+	struct exportinfo *exi = sarg->cs->exi;
+	struct exp_visible *visp = NULL;
 
 	vp = sarg->cs->vp;
 	sarg->mntdfid_set = FALSE;
@@ -1387,6 +1398,13 @@ rfs4_get_mntdfileid(nfs4_attr_cmd_t cmd, struct nfs4_svgetit_arg *sarg)
 		sarg->mntdfid_set = TRUE;
 	} else if (sarg->rdattr_error)
 		error = -1;
+
+	if (!error && PSEUDO(exi)) {
+		if ((stubvp && (exi->exi_vp == stubvp)) || (exi->exi_vp == vp))
+			sarg->mounted_on_fileid = exi->exi_ps_ino;
+		else if (nfs_visible_inode(exi, sarg->mounted_on_fileid, &visp))
+			sarg->mounted_on_fileid = visp->vis_ps_ino;
+	}
 
 	/*
 	 * error describes these cases:

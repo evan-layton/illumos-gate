@@ -813,6 +813,10 @@ export_link(nfs_export_t *ne, exportinfo_t *exi)
 	bckt = &ne->exptable[exptablehash(&exi->exi_fsid, &exi->exi_fid)];
 	exp_hash_link(exi, fid_hash, bckt);
 
+	bckt = &ne->ps_exptable[exptablehash(&exi->exi_ps_fsid,
+	    &exi->exi_ps_fid)];
+	exp_hash_link(exi, ps_fid_hash, bckt);
+
 	bckt = &ne->exptable_path_hash[pkp_tab_hash(exi->exi_export.ex_path,
 	    strlen(exi->exi_export.ex_path))];
 	exp_hash_link(exi, path_hash, bckt);
@@ -1414,6 +1418,8 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 	exi = kmem_zalloc(sizeof (*exi), KM_SLEEP);
 	exi->exi_fsid = fsid;
 	exi->exi_fid = fid;
+	exi->exi_ps_fsid = fsid;
+	exi->exi_ps_fid = fid;
 	exi->exi_vp = vp;
 	exi->exi_count = 1;
 	exi->exi_zoneid = crgetzoneid(cr);
@@ -1443,8 +1449,8 @@ exportfs(struct exportfs_args *args, model_t model, cred_t *cr)
 		goto out1;
 	}
 	exi->exi_fh.fh_xlen = exi->exi_fid.fid_len;
-	bcopy(exi->exi_fid.fid_data, exi->exi_fh.fh_xdata,
-	    exi->exi_fid.fid_len);
+	bcopy(exi->exi_ps_fid.fid_data, exi->exi_fh.fh_xdata,
+	    exi->exi_ps_fid.fid_len);
 
 	exi->exi_fh.fh_len = sizeof (exi->exi_fh.fh_data);
 
@@ -1886,6 +1892,7 @@ export_unlink(nfs_export_t *ne, struct exportinfo *exi)
 	ASSERT(RW_WRITE_HELD(&ne->exported_lock));
 
 	exp_hash_unlink(exi, fid_hash);
+	exp_hash_unlink(exi, ps_fid_hash);
 	exp_hash_unlink(exi, path_hash);
 	ASSERT3P(exi->exi_ne, ==, ne);
 	exi->exi_ne = NULL;
@@ -2471,14 +2478,17 @@ makefh4(nfs_fh4 *fh, vnode_t *vp, struct exportinfo *exi)
 
 	bzero(&fid, sizeof (fid));
 	fid.fid_len = MAXFIDSZ;
-	/*
-	 * vop_fid_pseudo() is used to set up NFSv4 namespace, so
-	 * use vop_fid_pseudo() here to get the fid instead of VOP_FID.
-	 */
-	error = vop_fid_pseudo(vp, &fid);
-	if (error)
-		return (error);
-
+	if (PSEUDO(exi))
+		gen_pseudo_fid(vp->v_path, &fid, NULL);
+	else {
+		/*
+		 * vop_fid_pseudo() is used to set up NFSv4 namespace, so
+		 * use vop_fid_pseudo() here to get the fid instead of VOP_FID.
+		 */
+		error = vop_fid_pseudo(vp, &fid);
+		if (error)
+			return (error);
+	}
 	fh->nfs_fh4_len = NFS_FH4_LEN;
 
 	fh_fmtp->fh4_i.fhx_fsid = exi->exi_fh.fh_fsid;
@@ -2773,6 +2783,37 @@ checkexport4(fsid_t *fsid, fid_t *fid, vnode_t *vp)
 			 */
 			if (vp == NULL || vp == exi->exi_vp)
 				return (exi);
+		}
+	}
+
+	/* search in export table with pseudo fsid/fid */
+	if (exi == NULL) {
+		for (exi = ne->ps_exptable[exptablehash(fsid, fid)];
+		    exi != NULL;
+		    exi = exi->fid_hash.next) {
+			if (ps_exportmatch(exi, fsid, fid)) {
+				/*
+				 * If this is the place holder for the
+				 * public file handle, then return the
+				 * real export entry for the public file
+				 * handle.
+				 */
+				if (exi->exi_export.ex_flags & EX_PUBLIC) {
+					exi = ne->exi_public;
+				}
+
+				/*
+				 * If vp is given, check if vp is the
+				 * same vnode as the exported node.
+				 *
+				 * Since VOP_FID of a lofs node returns the
+				 * fid of its real node (ufs), the exported
+				 * node for lofs and (pseudo) ufs may have
+				 * the same fsid and fid.
+				 */
+				if (vp == NULL || vp == exi->exi_vp)
+					return (exi);
+			}
 		}
 	}
 
