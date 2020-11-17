@@ -7879,6 +7879,7 @@ rfs4_op_open_confirm(nfs_argop4 *argop, nfs_resop4 *resop,
 	OPEN_CONFIRM4res *resp = &resop->nfs_resop4_u.opopen_confirm;
 	rfs4_state_t *sp;
 	nfsstat4 status;
+	bool_t funlock = FALSE; /* File unlock flag */
 
 	DTRACE_NFSV4_2(op__open__confirm__start, struct compound_state *, cs,
 	    OPEN_CONFIRM4args *, args);
@@ -7896,21 +7897,25 @@ rfs4_op_open_confirm(nfs_argop4 *argop, nfs_resop4 *resop,
 		return;
 	}
 
-	status = rfs4_get_state(&args->open_stateid, &sp, RFS4_DBS_VALID);
+	status = rfs4_get_state_nolock(&args->open_stateid,
+	    &sp, RFS4_DBS_VALID);
 	if (status != NFS4_OK) {
 		*cs->statusp = resp->status = status;
 		goto out;
 	}
 
-	/* Ensure specified filehandle matches */
-	if (cs->vp != sp->rs_finfo->rf_vp) {
-		rfs4_state_rele(sp);
-		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-		goto out;
-	}
-
 	/* hold off other access to open_owner while we tinker */
 	rfs4_sw_enter(&sp->rs_owner->ro_sw);
+
+	/* Take the READER lock on file */
+	rw_enter(&sp->rs_finfo->rf_file_rwlock, RW_READER);
+	funlock = TRUE;
+
+	/* Ensure specified filehandle matches */
+	if (cs->vp != sp->rs_finfo->rf_vp) {
+		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+		goto end;
+	}
 
 	switch (rfs4_check_stateid_seqid(sp, &args->open_stateid, cs)) {
 	case NFS4_CHECK_STATEID_OKAY:
@@ -7981,8 +7986,12 @@ rfs4_op_open_confirm(nfs_argop4 *argop, nfs_resop4 *resop,
 		*cs->statusp = resp->status = NFS4ERR_SERVERFAULT;
 		break;
 	}
+end:
+	if (funlock == TRUE) {
+		rw_exit(&sp->rs_finfo->rf_file_rwlock);
+	}
 	rfs4_sw_exit(&sp->rs_owner->ro_sw);
-	rfs4_state_rele(sp);
+	rfs4_state_rele_nounlock(sp);
 
 out:
 	DTRACE_NFSV4_2(op__open__confirm__done, struct compound_state *, cs,
@@ -8003,6 +8012,7 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_file_t *fp;
 	int fflags = 0;
 	stateid4 *stateid;
+	bool_t funlock = FALSE; /* File unlock flag */
 
 	DTRACE_NFSV4_2(op__open__downgrade__start, struct compound_state *, cs,
 	    OPEN_DOWNGRADE4args *, args);
@@ -8027,21 +8037,24 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 		stateid = &args->open_stateid;
 	}
 
-	status = rfs4_get_state(stateid, &sp, RFS4_DBS_VALID);
+	status = rfs4_get_state_nolock(stateid, &sp, RFS4_DBS_VALID);
 	if (status != NFS4_OK) {
 		*cs->statusp = resp->status = status;
 		goto out;
 	}
 
-	/* Ensure specified filehandle matches */
-	if (cs->vp != sp->rs_finfo->rf_vp) {
-		rfs4_state_rele(sp);
-		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-		goto out;
-	}
-
 	/* hold off other access to open_owner while we tinker */
 	rfs4_sw_enter(&sp->rs_owner->ro_sw);
+
+	/* Take the READER lock on file */
+	rw_enter(&sp->rs_finfo->rf_file_rwlock, RW_READER);
+	funlock = TRUE;
+
+	/* Ensure specified filehandle matches */
+	if (cs->vp != sp->rs_finfo->rf_vp) {
+		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+		goto end;
+	}
 
 	switch (rfs4_check_stateid_seqid(sp, stateid, cs)) {
 	case NFS4_CHECK_STATEID_OKAY:
@@ -8237,8 +8250,11 @@ rfs4_op_open_downgrade(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_update_open_resp(sp->rs_owner, resop, NULL);
 
 end:
+	if (funlock) {
+		rw_exit(&sp->rs_finfo->rf_file_rwlock);
+	}
 	rfs4_sw_exit(&sp->rs_owner->ro_sw);
-	rfs4_state_rele(sp);
+	rfs4_state_rele_nounlock(sp);
 out:
 	DTRACE_NFSV4_2(op__open__downgrade__done, struct compound_state *, cs,
 	    OPEN_DOWNGRADE4res *, resp);
@@ -8590,6 +8606,7 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_state_t *sp;
 	nfsstat4 status;
 	stateid4 *stateid;
+	bool_t funlock = FALSE; /* File unlock flag */
 
 	DTRACE_NFSV4_2(op__close__start, struct compound_state *, cs,
 	    CLOSE4args *, args);
@@ -8609,21 +8626,35 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 		stateid = &args->open_stateid;
 	}
 
-	status = rfs4_get_state(stateid, &sp, RFS4_DBS_INVALID);
+	/*
+	 * NB: rfs4_get_state() returns the state and takes READER
+	 * lock on file. But to get the order of locking same as
+	 * mds_op_open() [i.e. rfs4_sw_enter() followed by lock on
+	 * file], rfs4_get_state_nolock() is used to get the state,
+	 * followed by the file lock [after rfs4_sw_enter()].
+	 *
+	 * rfs4_close_all_state() takes WRITER lock on file, so make
+	 * sure to drop the acquired READER lock and set the funlock
+	 * flag accordingly to avoid double unlock.
+	 */
+	status = rfs4_get_state_nolock(stateid, &sp, RFS4_DBS_INVALID);
 	if (status != NFS4_OK) {
 		*cs->statusp = resp->status = status;
 		goto out;
 	}
 
-	/* Ensure specified filehandle matches */
-	if (cs->vp != sp->rs_finfo->rf_vp) {
-		rfs4_state_rele(sp);
-		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
-		goto out;
-	}
-
 	/* hold off other access to open_owner while we tinker */
 	rfs4_sw_enter(&sp->rs_owner->ro_sw);
+
+	/* Take the READER lock on file */
+	rw_enter(&sp->rs_finfo->rf_file_rwlock, RW_READER);
+	funlock = TRUE;
+
+	/* Ensure specified filehandle matches */
+	if (cs->vp != sp->rs_finfo->rf_vp) {
+		*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
+		goto end;
+	}
 
 	switch (rfs4_check_stateid_seqid(sp, &args->open_stateid, cs)) {
 	case NFS4_CHECK_STATEID_OKAY:
@@ -8695,8 +8726,11 @@ rfs4_op_close(nfs_argop4 *argop, nfs_resop4 *resop,
 	*cs->statusp = resp->status = status;
 
 end:
+	if (funlock) {
+		rw_exit(&sp->rs_finfo->rf_file_rwlock);
+	}
 	rfs4_sw_exit(&sp->rs_owner->ro_sw);
-	rfs4_state_rele(sp);
+	rfs4_state_rele_nounlock(sp);
 out:
 	DTRACE_NFSV4_2(op__close__done, struct compound_state *, cs,
 	    CLOSE4res *, resp);
@@ -9145,6 +9179,7 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 	bool_t create = TRUE;
 	bool_t lcreate = TRUE;
 	bool_t dup_lock = FALSE;
+	bool_t funlock = FALSE; /* File unlock flag */
 	int rc;
 
 	DTRACE_NFSV4_2(op__lock__start, struct compound_state *, cs,
@@ -9162,7 +9197,7 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 		NFS4_DEBUG(rfs4_debug, (CE_NOTE, "Creating new lock owner"));
 
 		stateid = &olo->open_stateid;
-		status = rfs4_get_state(stateid, &sp, RFS4_DBS_VALID);
+		status = rfs4_get_state_nolock(stateid, &sp, RFS4_DBS_VALID);
 		if (status != NFS4_OK) {
 			NFS4_DEBUG(rfs4_debug,
 			    (CE_NOTE, "Get state failed in lock %d", status));
@@ -9172,13 +9207,17 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 
 		/* Ensure specified filehandle matches */
 		if (cs->vp != sp->rs_finfo->rf_vp) {
-			rfs4_state_rele(sp);
+			rfs4_state_rele_nounlock(sp);
 			*cs->statusp = resp->status = NFS4ERR_BAD_STATEID;
 			goto done;
 		}
 
 		/* hold off other access to open_owner while we tinker */
 		rfs4_sw_enter(&sp->rs_owner->ro_sw);
+
+		/* Take the READER lock on file */
+		rw_enter(&sp->rs_finfo->rf_file_rwlock, RW_READER);
+		funlock = TRUE;
 
 		switch (rc = rfs4_check_stateid_seqid(sp, stateid, cs)) {
 		case NFS4_CHECK_STATEID_OLD:
@@ -9235,7 +9274,7 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 		/*
 		 * client is set only for 4.1?
 		 */
-		if(cs->client) {
+		if (cs->client) {
 			olo->lock_owner.clientid = cs->client->rc_clientid;
 		}
 
@@ -9345,16 +9384,16 @@ rfs4_op_lock(nfs_argop4 *argop, nfs_resop4 *resop,
 		rfs4_lockowner_rele(lo);
 	} else {
 		if (ISCURRENT(
-		        &args->locker.locker4_u.lock_owner.lock_stateid)) {
+		    &args->locker.locker4_u.lock_owner.lock_stateid)) {
 			if (ISSPECIAL(&cs->stateid)) {
 				*cs->statusp = resp->status =
-				                       NFS4ERR_BAD_STATEID;
+				    NFS4ERR_BAD_STATEID;
 				goto done;
 			}
 			stateid = &cs->stateid;
 		} else {
 			stateid =
-			        &args->locker.locker4_u.lock_owner.lock_stateid;
+			    &args->locker.locker4_u.lock_owner.lock_stateid;
 		}
 
 		/* get lsp and hold the lock on the underlying file struct */
@@ -9515,7 +9554,7 @@ out:
 
 	if (status == NFS4_OK) {
 		resp->LOCK4res_u.lock_stateid = cs->stateid =
-		                               lsp->rls_lockid.stateid;
+		    lsp->rls_lockid.stateid;
 		lsp->rls_lock_completed = TRUE;
 	}
 	/*
@@ -9541,8 +9580,11 @@ end:
 			rfs4_lo_state_rele(lsp, TRUE);
 	}
 	if (sp) {
+		if (funlock) {
+			rw_exit(&sp->rs_finfo->rf_file_rwlock);
+		}
 		rfs4_sw_exit(&sp->rs_owner->ro_sw);
-		rfs4_state_rele(sp);
+		rfs4_state_rele_nounlock(sp);
 	}
 
 done:
