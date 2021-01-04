@@ -1421,7 +1421,13 @@ nlm_host_create(char *name, const char *netid,
 	host->nh_netid = strdup(netid);
 	host->nh_knc = *knc;
 	nlm_copy_netbuf(&host->nh_addr, naddr);
-	nlm_copy_netbuf(&host->nh_laddr, laddr);
+	/*
+	 * laddr is NULL when server is taking locks
+	 * as client (nlm_frlock())
+	 */
+	if (laddr != NULL) {
+		nlm_copy_netbuf(&host->nh_laddr, laddr);
+	}
 
 	host->nh_state = 0;
 	host->nh_rpcb_state = NRPCB_NEED_UPDATE;
