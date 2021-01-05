@@ -1510,7 +1510,6 @@ void
 rfs4_recall_deleg(rfs4_file_t *fp, bool_t trunc, rfs4_client_t *cp)
 {
 	time_t elapsed1, elapsed2;
-	rfs4_session_t	*sp;
 
 	if (fp->rf_dinfo.rd_time_recalled != 0) {
 		elapsed1 = gethrestime_sec() - fp->rf_dinfo.rd_time_recalled;
