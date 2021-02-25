@@ -25,6 +25,7 @@
 /*
  * Copyright 2012 Milan Jurik. All rights reserved.
  * Copyright 2012 Marcel Telka <marcel@telka.sk>
+ * Copyright 2013 Nexenta Systems, Inc.  All rights reserved.
  * Copyright 2018 OmniOS Community Edition (OmniOSce) Association.
  * Copyright 2020 Tintri by DDN. All rights reserved.
  */
@@ -1180,6 +1181,7 @@ mir_close(queue_t *q)
 		/*
 		 * Destroy the cm_entry
 		 */
+		connmgr_cb_destroy(WR(q));
 		connmgr_destroy(WR(q));
 		qprocsoff(q);
 
@@ -1255,6 +1257,79 @@ mir_svc_idle_start(queue_t *q, mir_t *mir)
 		mir_timer_start(q, mir, mir->mir_ordrel_pending ?
 		    svc_ordrel_timeout : mir->mir_idle_timeout);
 	}
+}
+
+/*
+ * Copy out the RPC transaction id and RPC Direction
+ * from the mblk chain. Leave the mblk intact.
+ */
+bool_t
+mir_dir_xid(mblk_t *mp, uint32_t *dir, uint32_t *xid)
+{
+	unsigned char	*p;
+	unsigned char	*rptr;
+	mblk_t		*tmp;
+	int		 i, get_rpcdir;
+	uint32_t	 d_tmp = 0;
+
+	/*
+	 * If we can just grab the XID and RPC direction flag great.
+	 */
+	if ((IS_P2ALIGNED(mp->b_rptr, (sizeof (uint64_t)))) &&
+	    (mp->b_wptr - mp->b_rptr) >= (sizeof (uint64_t))) {
+		*xid = *((uint32_t *)mp->b_rptr);
+		*dir = ntohl(*((uint32_t *)(mp->b_rptr + sizeof (uint32_t))));
+		return (TRUE);
+	}
+
+	/*
+	 * Otherwise we need to copy byte-by-byte
+	 */
+	DTRACE_PROBE(krpc__i__bytecopy);
+
+	i = get_rpcdir = 0;
+	p = (unsigned char *)xid;
+	tmp = mp;
+
+	/*
+	 * While we have not exhausted the entire mblk chain:
+	 * copy the first sizeof uint32_t value into xid, and
+	 * then the second sizeof uint32_t value into a temporary
+	 * so that we can convert from network byte order.
+	 *
+	 * Should we exhaust the entire mblk chain in attempting
+	 * to do this, return FALSE.
+	 */
+	while (tmp) {
+		rptr = tmp->b_rptr;
+		while (rptr < tmp->b_wptr) {
+			*p++ = *rptr++;
+			/*
+			 * Have we collected enough bytes for
+			 * a uint32_t ?
+			 */
+			if (++i == sizeof (uint32_t)) {
+				/*
+				 * If yes, do we need to switch to
+				 * RPC Direction or are we all done ?
+				 */
+				if (get_rpcdir) {
+					/* Got it all */
+					*dir = ntohl(d_tmp);
+					return (TRUE);
+				}
+				/* start to collect RPC Direction */
+				get_rpcdir++;
+				i = 0;
+				p = (unsigned char *)&d_tmp;
+			}
+		}
+		tmp = tmp->b_cont;
+	}
+
+	/* We didn't get both of them.. */
+	DTRACE_PROBE(krpc__e__mblk_exhausted);
+	return (FALSE);
 }
 
 /* ARGSUSED */
@@ -1338,6 +1413,8 @@ mir_rput(queue_t *q, mblk_t *mp)
 	mblk_t	*cont_mp, *head_mp, *tail_mp, *mp1;
 	mir_t	*mir = q->q_ptr;
 	boolean_t stop_timer = B_FALSE;
+	uint32_t	xid;
+	uint32_t	dir;
 
 	ASSERT(mir != NULL);
 
@@ -1534,68 +1611,115 @@ mir_rput(queue_t *q, mblk_t *mp)
 		frag_header = 0;
 
 		/*
+		 * Get msg direction and handle to the appropriate ctxt
+		 */
+		if (!mir_dir_xid(head_mp, &dir, &xid)) {
+			/* XXX - if we can't get the dir, we're hosed */
+			mutex_exit(&mir->mir_mutex);
+			freemsg(head_mp);
+			return;
+		}
+
+		/*
 		 * We've got a complete RPC message; pass it to the
 		 * appropriate consumer.
 		 */
 		switch (mir->mir_type) {
 		case RPC_CLIENT:
-			if (clnt_dispatch_notify(head_mp, mir->mir_zoneid)) {
-				/*
-				 * Mark this stream as active.  This marker
-				 * is used in mir_timer().
-				 */
-				mir->mir_clntreq = 1;
-				mir->mir_use_timestamp = ddi_get_lbolt();
-			} else {
-				freemsg(head_mp);
+			switch (dir) {
+			case REPLY:
+				if (clnt_dispatch_notify(head_mp,
+				           mir->mir_zoneid, xid)) {
+					/*
+					 * Mark this stream as active.
+					 * This marker is used in mir_timer().
+					 */
+					mir->mir_clntreq = 1;
+					mir->mir_use_timestamp = ddi_get_lbolt();
+				} else {
+					freemsg(head_mp);
+				}
+				break;
+			case CALL:
+				/* TBD: client is now a callback server */
+			default:
+				RPCLOG(1, "mir_rput: TBD callback server %d\n",
+						dir);
+				break;
 			}
 			break;
-
 		case RPC_SERVER:
-			/*
-			 * Check for flow control before passing the
-			 * message to kRPC.
-			 */
-			if (!mir->mir_hold_inbound) {
-				if (mir->mir_krpc_cell) {
+			switch (dir) {
+			case REPLY:
+				/*
+				 * RPC Server initiated a Callback RPC and
+				 * is receiving a reply from the RPC Client.
+				 */
+				if (clnt_dispatch_notify(head_mp,
+						mir->mir_zoneid, xid)) {
+					mir->mir_clntreq = 1;
+					mir->mir_use_timestamp = ddi_get_lbolt();
+				} else {
+					freemsg(head_mp);
+				}
+				break;
 
+			case CALL:
+			default:
+				/*
+				 * Check for flow control before passing the
+				 * message to kRPC.
+				 */
+				if (!mir->mir_hold_inbound) {
+					if (!mir->mir_krpc_cell) {
+						/*
+						 * Count # of times this
+						 * happens. Should be never,
+						 * but experience shows
+						 * otherwise.
+						 */
+						mir_krpc_cell_null++;
+						freemsg(head_mp);
+						break;
+					}
 					if (mir_check_len(q, head_mp))
 						return;
 
 					if (q->q_first == NULL &&
-					    svc_queuereq(q, head_mp, TRUE)) {
+					    svc_queuereq(q, head_mp,
+						     TRUE)) {
 						/*
-						 * If the reference count is 0
+						 * If the reference
+						 * count is 0
 						 * (not including this
-						 * request), then the stream is
-						 * transitioning from idle to
-						 * non-idle.  In this case, we
-						 * cancel the idle timer.
+						 * request), then the
+						 * stream is
+						 * transitioning from
+						 * idle to
+						 * non-idle.  In this
+						 * case, we cancel the
+						 * idle timer.
 						 */
-						if (mir->mir_ref_cnt++ == 0)
-							stop_timer = B_TRUE;
+						if (mir->mir_ref_cnt++
+							  == 0)
+							stop_timer =
+							    B_TRUE;
 					} else {
 						(void) putq(q, head_mp);
-						mir->mir_inrservice = B_TRUE;
+						mir->mir_inrservice =
+						      B_TRUE;
 					}
 				} else {
 					/*
-					 * Count # of times this happens. Should
-					 * be never, but experience shows
-					 * otherwise.
+					 * If the outbound side of the stream
+					 * is flow controlled, then hold this
+					 * message until client catches up.
+					 * mir_hold_inbound is set in mir_wput
+					 * and cleared in mir_wsrv.
 					 */
-					mir_krpc_cell_null++;
-					freemsg(head_mp);
+					(void) putq(q, head_mp);
+					mir->mir_inrservice = B_TRUE;
 				}
-			} else {
-				/*
-				 * If the outbound side of the stream is
-				 * flow controlled, then hold this message
-				 * until client catches up. mir_hold_inbound
-				 * is set in mir_wput and cleared in mir_wsrv.
-				 */
-				(void) putq(q, head_mp);
-				mir->mir_inrservice = B_TRUE;
 			}
 			break;
 		default:

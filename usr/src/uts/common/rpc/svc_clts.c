@@ -104,6 +104,7 @@ struct svc_ops svc_clts_op = {
 	svc_clts_kstart,	/* Tell `ready-to-receive' to rpcmod */
 	svc_clts_kclone_xprt,	/* transport specific clone xprt function */
 	svc_clts_ktattrs,	/* Transport specific attributes */
+	.xp_ctl = NULL,
 	rpcmod_hold,		/* Increment transport reference count */
 	rpcmod_release		/* Decrement transport reference count */
 };

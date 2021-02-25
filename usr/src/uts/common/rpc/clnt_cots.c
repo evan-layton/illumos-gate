@@ -188,6 +188,8 @@
 #include <sys/sunddi.h>
 #include <sys/atomic.h>
 #include <sys/sdt.h>
+#include <sys/list.h>
+#include <sys/pathname.h>
 
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -197,11 +199,26 @@
 #include <rpc/auth.h>
 #include <rpc/clnt.h>
 #include <rpc/rpc_msg.h>
+#include <rpc/rpc_tags.h>
+
+#include <rpc/svc.h>
 
 #define	COTS_DEFAULT_ALLOCSIZE	2048
 
 #define	WIRE_HDR_SIZE	20	/* serialized call header, sans proc number */
 #define	MSG_OFFSET	128	/* offset of call into the mblk */
+
+/*
+ * Returns 0 if same
+ */
+#define	NETBUF_CMP(addr1, addr2) ((addr1->len == addr2->len) ?	\
+	bcmp(addr1->buf, addr2->buf, addr1->len) : 1)
+
+/*
+ * Bi-directional RPC by default
+ */
+
+int	clnt_cots_birpc = 1;
 
 const char *kinet_ntop6(uchar_t *, char *, size_t);
 
@@ -215,6 +232,13 @@ static bool_t	clnt_cots_kfreeres(CLIENT *, xdrproc_t, caddr_t);
 static void	clnt_cots_kdestroy(CLIENT *);
 static bool_t	clnt_cots_kcontrol(CLIENT *, int, char *);
 
+/* Callback RPC */
+static bool_t connmgr_cb_totest(CLIENT *, void *);
+
+/*
+ * Global list of connmgr tags
+ */
+static rpc_tag_hd_t cm_tag_hd;
 
 /* List of transports managed by the connection manager. */
 struct cm_xprt {
@@ -240,14 +264,18 @@ struct cm_xprt {
 		b_needrel:	1,	/* need T_ORDREL_REQ */
 		b_early_disc:	1,	/* got a T_ORDREL_IND or T_DISCON_IND */
 					/* disconnect during connect */
+		b_cb_tested:	1,	/* server side cb conn only */
+		b_cb:		1,	/* client side cb conn */
 
-		b_pad:		22;
+		b_pad:		20;
 
 #endif
 
 #ifdef	_BIT_FIELDS_LTOH
-		b_pad:		22,
+		b_pad:		20,
 
+		b_cb:		1,	/* client side cb conn */
+		b_cb_tested:	1,	/* server side cb conn only */
 		b_early_disc:	1,	/* got a T_ORDREL_IND or T_DISCON_IND */
 					/* disconnect during connect */
 		b_needrel:	1,	/* need T_ORDREL_REQ */
@@ -276,6 +304,8 @@ struct cm_xprt {
 
 #define	x_needrel	x_state.bit.b_needrel
 #define	x_early_disc    x_state.bit.b_early_disc
+#define	x_cb_tested	x_state.bit.b_cb_tested
+#define	x_cb		x_state.bit.b_cb
 
 #define	x_state_flags	x_state.word
 
@@ -291,6 +321,8 @@ struct cm_xprt {
 
 #define	X_NEEDREL	0x00800000
 #define	X_EARLYDISC	0x00400000
+#define	X_CBTESTED	0x00200000
+#define	X_CB		0x00100000
 
 #define	X_BADSTATES	(X_CLOSING | X_DEAD | X_DOOMED)
 
@@ -311,6 +343,8 @@ struct cm_xprt {
 	kcondvar_t	x_dis_cv;	/* to signal when disconnect attempt */
 					/* is complete */
 	zoneid_t	x_zoneid;	/* zone this xprt belongs to */
+	rpcprog_t	x_prog;		/* Program number for incoming calls */
+	void		*x_tags;	/* tags list for this xprt */
 };
 
 typedef struct cm_kstat_xprt {
@@ -362,6 +396,12 @@ typedef struct cku_private_s {
 	uint_t			cku_flags;
 #define	CKU_ONQUEUE		0x1
 #define	CKU_SENT		0x2
+#define	CKU_CALLBACK		0x4		/* server side call back */
+#define	CKU_BC_SETUP		0x8		/* init back channel info */
+#define	CKU_BACKCHANNEL		0x10		/* client side back channel */
+#define	CKU_TAGCMP		0x20		/* turns no tag check */
+#define	CKU_CB_TEST		0x40		/* cb test clnt handle */
+#define	CKU_BIND_CONN		0x80		/* bind conn to tag */
 
 	bool_t			cku_progress;	/* for CLSET_PROGRESS */
 	uint32_t		cku_xid;	/* current XID */
@@ -380,6 +420,8 @@ typedef struct cku_private_s {
 	int			cku_useresvport; /* Use reserved port */
 	int 			cku_bindsrc; 	/* bind to src address */
 	struct rpc_cots_client	*cku_stats;	/* stats for zone */
+	struct cm_xprt		*cku_entry;	/* Callback Connection Info */
+	tagid			cku_tag;
 } cku_private_t;
 
 static struct cm_xprt *connmgr_wrapconnect(struct cm_xprt *,
@@ -404,10 +446,8 @@ static void	connmgr_close(struct cm_xprt *);
 static void	connmgr_release(struct cm_xprt *);
 static struct cm_xprt *connmgr_wrapget(struct netbuf *, const struct timeval *,
 	cku_private_t *, bool_t);
-
 static struct cm_xprt *connmgr_get(struct netbuf *, const struct timeval *,
-	struct netbuf *, int, struct netbuf *, struct rpc_err *, dev_t,
-	bool_t, int, cred_t *, bool_t);
+	cku_private_t *, bool_t);
 
 static void connmgr_cancelconn(struct cm_xprt *);
 static enum clnt_stat connmgr_cwait(struct cm_xprt *, const struct timeval *,
@@ -420,6 +460,9 @@ static int	clnt_dispatch_send(queue_t *, mblk_t *, calllist_t *, uint_t,
 static int clnt_delay(clock_t, bool_t);
 
 static int waitforack(calllist_t *, t_scalar_t, const struct timeval *, bool_t);
+static bool_t connmgr_tag_swap(cku_private_t *, void *);
+static void connmgr_tag_unbind(cku_private_t *);
+static void connmgr_tag_destroy(cku_private_t *, char *);
 
 /*
  * Operations vector for TCP/IP based RPC
@@ -438,7 +481,10 @@ static int rpc_kstat_instance = 0;  /* keeps the current instance */
 				/* number for the next kstat_create */
 
 static struct cm_xprt *cm_hd = NULL;
+static struct cm_xprt *cb_cm_hd = NULL; /* callback list */
+
 static kmutex_t connmgr_lock;	/* for connection mngr's list of transports */
+static kmutex_t connmgr_cb_lock; /* for connmgr's callback list */
 
 extern kmutex_t clnt_max_msg_lock;
 
@@ -474,7 +520,8 @@ static const struct rpc_cots_client {
 };
 
 #define	COTSRCSTAT_INCR(p, x)	\
-	atomic_inc_64(&(p)->x.value.ui64)
+	if (p != NULL)					\
+		atomic_inc_64(&(p)->x.value.ui64)
 
 #define	CLNT_MAX_CONNS	1	/* concurrent connections between clnt/srvr */
 int clnt_max_conns = CLNT_MAX_CONNS;
@@ -634,13 +681,23 @@ clnt_cots_kcreate(dev_t dev, struct netbuf *addr, int family, rpcprog_t prog,
 	p->cku_cred = cred;
 	p->cku_device = dev;
 	p->cku_addrfmly = family;
-	p->cku_addr.buf = kmem_zalloc(addr->maxlen, KM_SLEEP);
-	p->cku_addr.maxlen = addr->maxlen;
-	p->cku_addr.len = addr->len;
-	bcopy(addr->buf, p->cku_addr.buf, addr->len);
 	p->cku_stats = rpcstat->rpc_cots_client;
 	p->cku_useresvport = -1; /* value has not been set */
 	p->cku_bindsrc = 0;
+	if(addr) {
+		p->cku_addr.buf = kmem_zalloc(addr->maxlen, KM_SLEEP);
+		p->cku_addr.maxlen = addr->maxlen;
+		p->cku_addr.len = addr->len;
+		bcopy(addr->buf, p->cku_addr.buf, addr->len);
+	} else {
+		/*
+		 * Only valid for a callback client handle
+		 * (the connection is picked up via tags).
+		 */
+		p->cku_addr.buf = NULL;
+		p->cku_addr.maxlen = 0;
+		p->cku_addr.len = 0;
+	}
 
 	*ncl = h;
 	return (0);
@@ -735,6 +792,79 @@ clnt_cots_kcontrol(CLIENT *h, int cmd, char *arg)
 
 		*(int *)arg = p->cku_useresvport;
 
+		return (TRUE);
+
+	case CLSET_CBCLIENT:
+		p->cku_flags |= CKU_CALLBACK;
+		return (TRUE);
+
+	case CLSET_CBSERVER_SETUP:
+		cmn_err(CE_WARN, "Not supported CLSET_CBSERVER_SETUP\n");
+		return (FALSE);
+
+	case CLSET_CBSERVER_CLEANUP:
+		cmn_err(CE_WARN, "Not supported CLSET_CBSERVER_CLEANUP\n");
+		return (FALSE);
+
+	case CLSET_BACKCHANNEL:
+		p->cku_flags |= CKU_BACKCHANNEL;
+		return (TRUE);
+
+	case CLSET_BACKCHANNEL_CLEAR:
+		/*
+		 * Clears both the backchannel related
+		 * flags
+		 */
+		p->cku_flags &= ~CKU_BACKCHANNEL;
+		p->cku_flags &= ~CKU_BC_SETUP;
+		return (TRUE);
+
+	case CLSET_TAG:
+		p->cku_flags |= CKU_TAGCMP;
+		bcopy(arg, p->cku_tag, sizeof (tagid));
+		return (TRUE);
+
+	case CLSET_TAG_CLEAR:
+		p->cku_flags &= ~CKU_TAGCMP;
+		bzero(p->cku_tag, sizeof (tagid));
+		return (TRUE);
+
+	case CLSET_TAG_SWAP:
+		return (connmgr_tag_swap(p, arg));
+
+	case CLSET_CB_TEST:
+		p->cku_flags |= CKU_CB_TEST;
+		return (TRUE);
+
+	case CLGET_CB_UNTESTED:
+		return (connmgr_cb_totest(h, arg));
+
+	case CLSET_CB_TEST_CLEAR:
+		p->cku_flags &= ~CKU_CB_TEST;
+		return (TRUE);
+
+	case CLSET_NON_BIRPC:
+		clnt_cots_birpc = 0;
+		return (TRUE);
+
+	case CLSET_CBSERVER_CLEAR:
+		p->cku_flags &= ~CKU_BC_SETUP;
+		return (TRUE);
+
+	case CLSET_BINDCONN_TO_TAG:
+		p->cku_flags |= CKU_BIND_CONN;
+		return (TRUE);
+
+	case CLSET_CLEAR_BINDCONN:
+		p->cku_flags &= ~CKU_BIND_CONN;
+		return (TRUE);
+
+	case CLSET_TAG_CONN_UNBIND:
+		connmgr_tag_unbind(p);
+		return (TRUE);
+
+	case CLSET_TAG_DESTROY:
+		rpc_destroy_tag(&cm_tag_hd, (void *)arg);
 		return (TRUE);
 
 	case CLSET_BINDSRCADDR:
@@ -1187,7 +1317,7 @@ dispatch_again:
 
 	RPCLOG(64, "clnt_cots_kcallit: sent call for xid 0x%x\n",
 	    (uint_t)p->cku_xid);
-	p->cku_flags = (CKU_ONQUEUE|CKU_SENT);
+	p->cku_flags |= (CKU_ONQUEUE|CKU_SENT);
 	p->cku_recv_attempts = 1;
 
 #ifdef	RPCDEBUG
@@ -1537,8 +1667,17 @@ read_again:
 	    p->cku_xid);
 	RPCLOG(64, " status is %s\n", clnt_sperrno(p->cku_err.re_status));
 cots_done:
-	if (cm_entry)
+	if (cm_entry) {
+
+		/*
+		 * If it was a test of the cb connection, set status as
+		 * tested.
+		 */
+		if ((p->cku_flags & (CKU_CALLBACK | CKU_CB_TEST)) &&
+		    p->cku_err.re_status == RPC_SUCCESS)
+			cm_entry->x_cb_tested = TRUE;
 		connmgr_release(cm_entry);
+	}
 
 	if (mp != NULL)
 		freemsg(mp);
@@ -1777,6 +1916,176 @@ connmgr_cwait(struct cm_xprt *cm_entry, const struct timeval *waitp,
 	return (clstat);
 }
 
+static bool_t
+clnt_connmgr_cmptag(cku_private_t *p, struct cm_xprt *xprt)
+{
+	bool_t same_tag = FALSE;
+	bool_t bc_call;
+	bool_t bc_conn;
+	int tagless = 0;
+
+	tagless = rpc_is_taglist_empty(xprt->x_tags);
+
+
+	bc_conn = xprt->x_cb;
+
+	/*
+	 * Old style request with no TAGS (nfsv4.0/nfsv3/NLM)
+	 * If the connection is tagged, return TRUE only if it is
+	 * a fore-channel only connection. Don't allow old styled
+	 * requests over a connection that allows only backchannel traffic.
+	 */
+	if (!(p->cku_flags & CKU_TAGCMP)) {
+
+		if (bc_conn)
+			return (FALSE);
+
+		return (TRUE);
+	}
+
+	bc_call = (p->cku_flags & CKU_BACKCHANNEL) ? TRUE : FALSE;
+
+	/*
+	 * If request is for back channel exclusively,
+	 * but the connection is not marked as BC connection.
+	 */
+
+	if (bc_call && !bc_conn)
+		return (FALSE);
+
+	/*
+	 * In case of non bi-dir RPC, if request is for fore channel,
+	 * but the connection is for back channel only, fail.
+	 */
+
+	if (!clnt_cots_birpc && (!bc_call && bc_conn))
+		return (FALSE);
+
+
+	/*
+	 * Now compare tags
+	 */
+
+	if (!tagless) {
+		same_tag = rpc_cmp_tag(xprt->x_tags, (void *)p->cku_tag);
+	}
+	if (!same_tag) {
+		rpc_add_tag(&cm_tag_hd, (void *)xprt, (void *)p->cku_tag);
+	}
+
+	return (TRUE);
+}
+
+/*
+ * connmgr wrapper to swap tag values
+ * client handle's tag p->cku_tag is changedd to new
+ * tag as well
+ */
+
+static bool_t
+connmgr_tag_swap(cku_private_t *p, void *newtag)
+{
+
+	if (!rpc_tag_swap(&cm_tag_hd, (void *)p->cku_tag, newtag))
+		return (FALSE);
+
+	/*
+	 * Now set the new tag on the client handle
+	 */
+	bcopy(newtag, p->cku_tag, sizeof (tagid));
+
+	return (TRUE);
+}
+
+/*
+ * Detaches all the connections associated with the tag.
+ */
+static void
+connmgr_tag_disassociate(cku_private_t *p)
+{
+	rpc_tag_t *tag;
+
+	tag = rpc_lookup_tag(&cm_tag_hd, (void *)p->cku_tag, FALSE);
+
+	if (tag == NULL) {
+		return;
+	}
+
+	mutex_enter(&tag->rt_lock);
+	rpc_remove_all_xprt(&cm_tag_hd, tag);
+	/*
+	 * Release the refcnt acquired by rpc_lookup_tag()
+	 */
+	RPC_TAG_RELE_LOCKED(tag);
+	mutex_exit(&tag->rt_lock);
+
+
+}
+
+/*
+ * Detaches the connections associated with the tag (eventually).
+ * The way we go about doing this is, we mark the connection as
+ * doomed. The connection will take the usual course to closure
+ * when the timer goes off, at which point it is detached from
+ * the tag as well. This way, we try to avoid rt_refcnt from
+ * going to 0 and having to reallocate the tag for the new
+ * connection.
+ */
+static void
+connmgr_tag_unbind(cku_private_t *p)
+{
+
+	rpc_tag_t *tag;
+	int back_chan = 0;
+	struct cm_xprt *xprt;
+	void *cookie = NULL;
+
+	if (p->cku_flags & CKU_BACKCHANNEL)
+		back_chan = 1;
+
+	/*
+	 * Unfortunately we'll need to hold this lock
+	 * to change x_state_flags
+	 */
+	mutex_enter(&connmgr_lock);
+
+	tag = rpc_lookup_tag(&cm_tag_hd, (void *)p->cku_tag, FALSE);
+
+	if (tag == NULL) {
+		mutex_exit(&connmgr_lock);
+		return;
+	}
+
+	mutex_enter(&tag->rt_lock);
+
+	xprt = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+	while (xprt) {
+		/*
+		 * Mark only connections of the right type
+		 * in the case for non-bidir rpc.
+		 */
+		if (!clnt_cots_birpc &&
+		    ((back_chan && !xprt->x_cb) ||
+		    (!back_chan && xprt->x_cb))) {
+			xprt =
+			    (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+			continue;
+		}
+
+		if ((xprt->x_state_flags & X_DOOMED) == 0)
+			xprt->x_doomed = TRUE;
+
+		xprt = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+	}
+	/*
+	 * Release the refcnt acquired by rpc_lookup_tag()
+	 */
+	RPC_TAG_RELE_LOCKED(tag);
+	mutex_exit(&tag->rt_lock);
+
+	mutex_exit(&connmgr_lock);
+}
+
 /*
  * Primary interface for how RPC grabs a connection.
  */
@@ -1789,10 +2098,7 @@ connmgr_wrapget(
 {
 	struct cm_xprt *cm_entry;
 
-	cm_entry = connmgr_get(retryaddr, waitp, &p->cku_addr, p->cku_addrfmly,
-	    &p->cku_srcaddr, &p->cku_err, p->cku_device,
-	    p->cku_client.cl_nosignal, p->cku_useresvport, p->cku_cred,
-	    srcbind_only);
+	cm_entry = connmgr_get(retryaddr, waitp, p, srcbind_only);
 
 	if (cm_entry == NULL) {
 		/*
@@ -1814,6 +2120,183 @@ connmgr_wrapget(
 }
 
 /*
+ * Make sure the cm_xprt is not destryoed by connmgr_cb_destroy
+ * from cb_cm_hd list. Expects connmgr_cb_lock to be held.
+ */
+static boolean_t
+connmgr_cb_doomed(struct cm_xprt *xprt)
+{
+	struct cm_xprt *cm_entry;
+
+	ASSERT(MUTEX_HELD(&connmgr_cb_lock));
+
+	cm_entry = cb_cm_hd;
+	while (cm_entry != NULL) {
+
+		if (cm_entry == xprt)
+			return (B_FALSE);
+
+		cm_entry = cm_entry->x_next;
+	}
+
+	return (B_TRUE);
+}
+
+/* ARGSUSED */
+struct cm_xprt *
+connmgr_cb_get(struct netbuf *retryaddr, const struct timeval *waitp,
+    cku_private_t *p)
+{
+	rpc_tag_t *tag;
+	struct cm_xprt *cm_entry, *lru_entry;
+	struct netbuf *srcaddr;
+	clock_t prev_time;
+	bool_t cbconn_test = FALSE;
+	void *cookie = NULL;
+
+	ASSERT(p->cku_flags & (CKU_TAGCMP|CKU_CALLBACK));
+
+	cbconn_test = (p->cku_flags & CKU_CB_TEST);
+
+	/*
+	 * Unfortunately we'll need to hold this lock to
+	 * check/update x_src and x_time and x_cb_tested.
+	 */
+	mutex_enter(&connmgr_cb_lock);
+
+	tag = rpc_lookup_tag(&cm_tag_hd, (void *)p->cku_tag, FALSE);
+	if (tag == NULL) {
+		mutex_exit(&connmgr_cb_lock);
+		p->cku_err.re_status = RPC_CANTCONNECT;
+		p->cku_err.re_errno = EIO;
+		return (NULL);
+	}
+
+	prev_time = ddi_get_lbolt();
+	lru_entry = NULL;
+
+	/*
+	 * Pick the LRU cm_entry for the tag
+	 */
+	mutex_enter(&tag->rt_lock);
+
+	cm_entry = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+	while (cm_entry) {
+
+		/*
+		 * Skip doomed callback xprt(s)
+		 */
+		if (connmgr_cb_doomed(cm_entry)) {
+			cm_entry =
+			    (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+			continue;
+		}
+
+		srcaddr = &cm_entry->x_src;
+		if ((retryaddr != NULL) &&
+		    (NETBUF_CMP(retryaddr, srcaddr) != 0)) {
+			cm_entry =
+			    (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+			continue;
+		}
+
+		/*
+		 * If it is a cb connection test, pick up only untested
+		 * connections. Skip already tested connections.
+		 */
+
+		if (cbconn_test &&
+		    (cm_entry->x_cb_tested == TRUE)) {
+			cm_entry =
+			    (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+			continue;
+		}
+
+		if ((cm_entry->x_time - prev_time) <= 0 || lru_entry == NULL) {
+			lru_entry = cm_entry;
+			prev_time = cm_entry->x_time;
+		}
+
+		cm_entry = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+	}
+
+	mutex_exit(&tag->rt_lock);
+
+	if (lru_entry != NULL) {
+		CONN_HOLD(lru_entry);
+		lru_entry->x_time = ddi_get_lbolt();
+	}
+
+	/*
+	 * Release the refcnt acquired by rpc_lookup_tag()
+	 */
+	RPC_TAG_RELE(tag);
+
+	mutex_exit(&connmgr_cb_lock);
+
+	DTRACE_PROBE2(cb__connmgr, char *, "lru_entry",
+	    struct cm_xprt *, lru_entry);
+
+	if (lru_entry == NULL) {
+		p->cku_err.re_status = RPC_CANTCONNECT;
+		p->cku_err.re_errno = EIO;
+		return (NULL);
+	}
+
+	return (lru_entry);
+}
+
+/*
+ * Given a specific tag, return number of untested
+ * connections.
+ */
+
+bool_t
+connmgr_cb_totest(CLIENT *h, void *conn_num)
+{
+	cku_private_t *p = htop(h);
+	rpc_tag_t *tag;
+	struct cm_xprt *cm_entry;
+	void *cookie = NULL;
+	int cno = 0;
+
+	/*
+	 * Unfortunately we'll need to hold this lock to
+	 * check x_cb_tested and validate cm_entry.
+	 */
+	mutex_enter(&connmgr_cb_lock);
+
+	tag = rpc_lookup_tag(&cm_tag_hd, (void *)p->cku_tag, FALSE);
+	if (tag == NULL) {
+		mutex_exit(&connmgr_cb_lock);
+		*((int *)conn_num) = cno;
+		return (FALSE);
+	}
+
+	mutex_enter(&tag->rt_lock);
+	cm_entry = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+
+	while (cm_entry) {
+		if ((connmgr_cb_doomed(cm_entry) == FALSE) &&
+		    (cm_entry->x_cb_tested == FALSE))
+			cno++;
+		cm_entry = (struct cm_xprt *)rpc_get_next_xprt(tag, &cookie);
+	}
+
+	/*
+	 * Release the refcnt acquired by rpc_lookup_tag()
+	 */
+	RPC_TAG_RELE_LOCKED(tag);
+	mutex_exit(&tag->rt_lock);
+
+	mutex_exit(&connmgr_cb_lock);
+
+	*((int *)conn_num) = cno;
+	return (TRUE);
+}
+
+
+/*
  * Obtains a transport to the server specified in addr.  If a suitable transport
  * does not already exist in the list of cached transports, a new connection
  * is created, connected, and added to the list. The connection is for sending
@@ -1827,14 +2310,7 @@ static struct cm_xprt *
 connmgr_get(
 	struct netbuf	*retryaddr,
 	const struct timeval	*waitp,	/* changed to a ptr to converse stack */
-	struct netbuf	*destaddr,
-	int		addrfmly,
-	struct netbuf	*srcaddr,
-	struct rpc_err	*rpcerr,
-	dev_t		device,
-	bool_t		nosignal,
-	int		useresvport,
-	cred_t		*cr,
+	cku_private_t	*p,
 	bool_t		do_srcbind)
 {
 	struct cm_xprt *cm_entry;
@@ -1847,6 +2323,21 @@ connmgr_get(
 	int tidu_size;
 	bool_t	connected;
 	zoneid_t zoneid = rpc_zoneid();
+	struct netbuf	*destaddr = &p->cku_addr;
+	struct netbuf	*cm_destaddr, *cm_srcaddr;
+	int		addrfmly = p->cku_addrfmly;
+	struct netbuf	*srcaddr = &p->cku_srcaddr;
+	struct rpc_err	*rpcerr = &p->cku_err;
+	dev_t		device = p->cku_device;
+	bool_t		nosignal = p->cku_client.cl_nosignal;
+	int		useresvport = p->cku_useresvport;
+
+	/*
+	 * Server side callback connections
+	 */
+	if (p->cku_flags & CKU_CALLBACK) {
+		return (connmgr_cb_get(retryaddr, waitp, p));
+	}
 
 	/*
 	 * If the call is not a retry, look for a transport entry that
@@ -1945,7 +2436,7 @@ use_new_conn:
 					 */
 					return (connmgr_wrapconnect(cm_entry,
 					    waitp, destaddr, addrfmly, srcaddr,
-					    rpcerr, TRUE, nosignal, cr));
+					    rpcerr, TRUE, nosignal, p->cku_cred));
 				}
 				i++;
 
@@ -2015,6 +2506,7 @@ start_retry_loop:
 		while ((cm_entry = *cmp) != NULL) {
 			ASSERT(cm_entry != cm_entry->x_next);
 
+			cm_srcaddr = &cm_entry->x_src;
 			/*
 			 * determine if this connection matches the passed
 			 * in retry address.  If it does not match, advance
@@ -2022,9 +2514,7 @@ start_retry_loop:
 			 */
 			if (zoneid != cm_entry->x_zoneid ||
 			    device != cm_entry->x_rdev ||
-			    retryaddr->len != cm_entry->x_src.len ||
-			    bcmp(retryaddr->buf, cm_entry->x_src.buf,
-			    retryaddr->len) != 0) {
+			    (NETBUF_CMP(retryaddr, cm_srcaddr)) != 0) {
 				cmp = &cm_entry->x_next;
 				continue;
 			}
@@ -2076,9 +2566,10 @@ start_retry_loop:
 			 * a new source address than to fail it altogether,
 			 * since that port may never be released.
 			 */
-			if (destaddr->len != cm_entry->x_server.len ||
-			    bcmp(destaddr->buf, cm_entry->x_server.buf,
-			    destaddr->len) != 0) {
+
+			cm_destaddr = &cm_entry->x_server;
+
+			if (NETBUF_CMP(destaddr, cm_destaddr)) {
 				RPCLOG(1, "connmgr_get: tiptr %p"
 				    " is going to a different server"
 				    " with the port that belongs"
@@ -2099,7 +2590,7 @@ start_retry_loop:
 			if (cm_entry->x_connected == FALSE) {
 				return (connmgr_wrapconnect(cm_entry,
 				    waitp, destaddr, addrfmly, NULL,
-				    rpcerr, TRUE, nosignal, cr));
+				    rpcerr, TRUE, nosignal, p->cku_cred));
 			} else {
 				CONN_HOLD(cm_entry);
 
@@ -2131,7 +2622,7 @@ start_retry_loop:
 	cm_entry = (struct cm_xprt *)
 	    kmem_zalloc(sizeof (struct cm_xprt), KM_SLEEP);
 
-	cm_entry->x_server.buf = kmem_alloc(destaddr->len, KM_SLEEP);
+	cm_entry->x_server.buf = kmem_zalloc(destaddr->len, KM_SLEEP);
 	bcopy(destaddr->buf, cm_entry->x_server.buf, destaddr->len);
 	cm_entry->x_server.len = cm_entry->x_server.maxlen = destaddr->len;
 
@@ -2144,6 +2635,10 @@ start_retry_loop:
 	cv_init(&cm_entry->x_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&cm_entry->x_conn_cv, NULL, CV_DEFAULT, NULL);
 	cv_init(&cm_entry->x_dis_cv, NULL, CV_DEFAULT, NULL);
+
+	cm_entry->x_cb = (p->cku_flags & CKU_BACKCHANNEL) ? TRUE : FALSE;
+
+	rpc_init_taglist(&cm_entry->x_tags);
 
 	/*
 	 * Note that we add this partially initialized entry to the
@@ -2285,7 +2780,7 @@ start_retry_loop:
 		 * This is a bound end-point so don't close it's stream.
 		 */
 		connected = connmgr_connect(cm_entry, wq, destaddr, addrfmly,
-		    &call, &tidu_size, FALSE, waitp, nosignal, cr);
+		    &call, &tidu_size, FALSE, waitp, nosignal, p->cku_cred);
 		*rpcerr = call.call_err;
 		cv_destroy(&call.call_cv);
 
@@ -2297,7 +2792,7 @@ start_retry_loop:
 	 * Set up a transport entry in the connection manager's list.
 	 */
 	if (srcaddr->len > 0) {
-		cm_entry->x_src.buf = kmem_alloc(srcaddr->len, KM_SLEEP);
+		cm_entry->x_src.buf = kmem_zalloc(srcaddr->len, KM_SLEEP);
 		bcopy(srcaddr->buf, cm_entry->x_src.buf, srcaddr->len);
 		cm_entry->x_src.len = cm_entry->x_src.maxlen = srcaddr->len;
 	} /* Else kmem_zalloc() of cm_entry already sets its x_src to NULL. */
@@ -2335,6 +2830,9 @@ start_retry_loop:
 	cm_entry->x_early_disc = FALSE;
 	cm_entry->x_needdis = (cm_entry->x_connected == FALSE);
 	cm_entry->x_ctime = ddi_get_lbolt();
+
+	DTRACE_PROBE2(connmgr__get, char *, "created a new cm_entry",
+	    struct cm_xprt *, cm_entry);
 
 	/*
 	 * Notify any threads waiting that the connection attempt is done.
@@ -2583,7 +3081,16 @@ connmgr_close(struct cm_xprt *cm_entry)
 	if (cm_entry->x_tiptr != NULL)
 		(void) t_kclose(cm_entry->x_tiptr, 1);
 
+	/*
+	 * Remove all tags
+	 */
+	if (!rpc_is_taglist_empty(cm_entry->x_tags))
+		rpc_remove_all_tag(&cm_tag_hd, (void *)cm_entry);
+
+	rpc_destroy_taglist(&cm_entry->x_tags);
+
 	mutex_exit(&cm_entry->x_lock);
+
 	if (cm_entry->x_ksp != NULL) {
 		mutex_enter(&connmgr_lock);
 		cm_entry->x_ksp->ks_private = NULL;
@@ -2608,8 +3115,11 @@ connmgr_close(struct cm_xprt *cm_entry)
 	cv_destroy(&cm_entry->x_conn_cv);
 	cv_destroy(&cm_entry->x_dis_cv);
 
-	kmem_free(cm_entry->x_server.buf, cm_entry->x_server.maxlen);
-	kmem_free(cm_entry->x_src.buf, cm_entry->x_src.maxlen);
+	if (cm_entry->x_server.buf != NULL)
+		kmem_free(cm_entry->x_server.buf, cm_entry->x_server.maxlen);
+	if (cm_entry->x_src.buf != NULL)
+		kmem_free(cm_entry->x_src.buf, cm_entry->x_src.maxlen);
+	cm_entry->x_cb = FALSE;
 	kmem_free(cm_entry, sizeof (struct cm_xprt));
 }
 
@@ -3139,11 +3649,150 @@ connmgr_snddis(struct cm_xprt *cm_entry)
 	put(q, mp);
 }
 
+void
+connmgr_cb_add(struct cm_xprt *cm_entry)
+{
+	mutex_enter(&connmgr_cb_lock);
+	cm_entry->x_next = cb_cm_hd;
+	cb_cm_hd = cm_entry;
+	mutex_exit(&connmgr_cb_lock);
+}
+
+/*
+ * lookup the cb_cm_hd list for a cm_xprt
+ * Adds a reference to the xprt
+ */
+
+static struct cm_xprt *
+connmgr_cb_lookup(queue_t *wq)
+{
+	struct cm_xprt *cm_entry;
+
+	mutex_enter(&connmgr_cb_lock);
+	cm_entry = cb_cm_hd;
+
+	while (cm_entry) {
+		if (cm_entry->x_wq == wq) {
+			CONN_HOLD(cm_entry);
+			break;
+		}
+		cm_entry = cm_entry->x_next;
+	}
+	mutex_exit(&connmgr_cb_lock);
+
+	return (cm_entry);
+}
+
+
+/*
+ * Creates a connection manager entry for callback connection
+ * and adds it to the callback connection list
+ */
+
+/* ARGSUSED */
+int
+connmgr_cb_create(void *tp_handle, rpcprog_t prog, rpcvers_t vers,
+    int family, void *tag)
+{
+	struct cm_xprt *cm_entry;
+	uint_t addr_len;
+	zoneid_t zoneid = rpc_zoneid();
+	vnode_t *vp;
+	struct sockaddr_storage *sa;
+	char *devnam;
+	SVCMASTERXPRT *mxprt = (SVCMASTERXPRT *)tp_handle;
+
+	/*
+	 * If there is already a cm_xprt for the same transport
+	 * then just add the tag.
+	 */
+	if (cm_entry = connmgr_cb_lookup(mxprt->xp_wq)) {
+		/*
+		 * Do nothing if the same tag already exists
+		 * for this cm_xprt, else add the tag
+		 */
+		if (rpc_cmp_tag(cm_entry->x_tags, tag) == FALSE)
+			rpc_add_tag(
+			    &cm_tag_hd, (void *)cm_entry, (void *)tag);
+
+		connmgr_release(cm_entry);
+
+		return (0);
+	}
+
+
+	cm_entry = (struct cm_xprt *)
+	    kmem_zalloc(sizeof (struct cm_xprt), KM_SLEEP);
+
+	cm_entry->x_tiptr = NULL;
+
+	addr_len = mxprt->xp_rtaddr.len;
+	cm_entry->x_server.buf = kmem_zalloc(addr_len, KM_SLEEP);
+	bcopy(mxprt->xp_rtaddr.buf, cm_entry->x_server.buf, addr_len);
+	cm_entry->x_server.len = cm_entry->x_server.maxlen = addr_len;
+
+	addr_len = mxprt->xp_lcladdr.len;
+	cm_entry->x_src.buf = kmem_zalloc(addr_len, KM_SLEEP);
+	bcopy(mxprt->xp_lcladdr.buf, cm_entry->x_src.buf, addr_len);
+	cm_entry->x_src.len = cm_entry->x_src.maxlen = addr_len;
+	cm_entry->x_tiptr = NULL;
+
+
+	cm_entry->x_state_flags = X_CONNECTED;
+	cm_entry->x_ref = 0;
+	cm_entry->x_family = family;
+	cm_entry->x_zoneid = zoneid;
+	mutex_init(&cm_entry->x_lock, NULL, MUTEX_DEFAULT, NULL);
+	cv_init(&cm_entry->x_cv, NULL, CV_DEFAULT, NULL);
+	cv_init(&cm_entry->x_conn_cv, NULL, CV_DEFAULT, NULL);
+	cm_entry->x_wq = mxprt->xp_wq;
+	cm_entry->x_tidu_size = mxprt->xp_msg_size;
+	cm_entry->x_prog = prog;
+	cm_entry->x_cb = FALSE;
+
+	sa = (struct sockaddr_storage *)mxprt->xp_lcladdr.buf;
+	switch (sa->ss_family) {
+	case AF_INET:
+		devnam = "/dev/tcp";
+		break;
+	case AF_INET6:
+		devnam = "/dev/tcp6";
+		break;
+	default:
+		goto errout;
+	}
+
+	if (lookupname(devnam, UIO_SYSSPACE, FOLLOW, NULLVPP, &vp) != 0) {
+		goto errout;
+	}
+
+	if (vp->v_type != VCHR) {
+		VN_RELE(vp);
+		goto errout;
+	}
+
+	cm_entry->x_rdev = vp->v_rdev;
+
+	VN_RELE(vp);
+
+	/* XXX do we need kstats */
+	cm_entry->x_ksp = NULL;
+	rpc_init_taglist(&cm_entry->x_tags);
+	rpc_add_tag(&cm_tag_hd, (void *)cm_entry, tag);
+
+	connmgr_cb_add(cm_entry);
+
+	return (0);
+
+errout:
+	connmgr_close(cm_entry);
+	return (1);
+}
+
 /*
  * We end up here if there is a connection disconnect.
  * The cm_entry is taken off the list.
  */
-
 void
 connmgr_destroy(queue_t *wq)
 {
@@ -3166,6 +3815,37 @@ connmgr_destroy(queue_t *wq)
 		cm_entry = cm_entry->x_next;
 	}
 	mutex_exit(&connmgr_lock);
+
+	if (cm_entry)
+		connmgr_close(cm_entry);
+}
+
+/*
+ * We end up here if there is a connection disconnect.
+ * The cm_entry is taken off the list. All tags are removed.
+ */
+void
+connmgr_cb_destroy(queue_t *wq)
+{
+	struct cm_xprt *cm_entry, *cm_prev;
+
+	mutex_enter(&connmgr_cb_lock);
+	cm_entry = cb_cm_hd;
+	cm_prev = NULL;
+
+	while (cm_entry) {
+		if (cm_entry->x_wq == wq) {
+			if (cm_prev)
+				cm_prev->x_next = cm_entry->x_next;
+			else
+				cb_cm_hd = cm_entry->x_next;
+			cm_entry->x_next = NULL;
+			break;
+		}
+		cm_prev = cm_entry;
+		cm_entry = cm_entry->x_next;
+	}
+	mutex_exit(&connmgr_cb_lock);
 
 	if (cm_entry)
 		connmgr_close(cm_entry);
@@ -3234,47 +3914,11 @@ clnt_dispatch_send(queue_t *q, mblk_t *mp, calllist_t *e, uint_t xid,
  * the error and return.
  */
 bool_t
-clnt_dispatch_notify(mblk_t *mp, zoneid_t zoneid)
+clnt_dispatch_notify(mblk_t *mp, zoneid_t zoneid, uint32_t xid)
 {
 	calllist_t *e = NULL;
 	call_table_t *chtp;
-	uint32_t xid;
 	uint_t hash;
-
-	if ((IS_P2ALIGNED(mp->b_rptr, sizeof (uint32_t))) &&
-	    (mp->b_wptr - mp->b_rptr) >= sizeof (xid))
-		xid = *((uint32_t *)mp->b_rptr);
-	else {
-		int i = 0;
-		unsigned char *p = (unsigned char *)&xid;
-		unsigned char *rptr;
-		mblk_t *tmp = mp;
-
-		/*
-		 * Copy the xid, byte-by-byte into xid.
-		 */
-		while (tmp) {
-			rptr = tmp->b_rptr;
-			while (rptr < tmp->b_wptr) {
-				*p++ = *rptr++;
-				if (++i >= sizeof (xid))
-					goto done_xid_copy;
-			}
-			tmp = tmp->b_cont;
-		}
-
-		/*
-		 * If we got here, we ran out of mblk space before the
-		 * xid could be copied.
-		 */
-		ASSERT(tmp == NULL && i < sizeof (xid));
-
-		RPCLOG0(1,
-		    "clnt_dispatch_notify: message less than size of xid\n");
-		return (FALSE);
-
-	}
-done_xid_copy:
 
 	hash = call_hash(xid, clnt_cots_hash_size);
 	chtp = &cots_call_ht[hash];
@@ -3762,6 +4406,9 @@ clnt_cots_init(void)
 	mutex_init(&connmgr_lock, NULL, MUTEX_DEFAULT, NULL);
 	mutex_init(&clnt_pending_lock, NULL, MUTEX_DEFAULT, NULL);
 
+	rpc_taghd_init(&cm_tag_hd,
+	    offsetof(struct cm_xprt, x_tags));
+
 	if (clnt_cots_hash_size < DEFAULT_MIN_HASH_SIZE)
 		clnt_cots_hash_size = DEFAULT_MIN_HASH_SIZE;
 
@@ -3772,6 +4419,7 @@ clnt_cots_init(void)
 void
 clnt_cots_fini(void)
 {
+	rpc_taghd_destroy(&cm_tag_hd);
 	(void) zone_key_delete(zone_cots_key);
 }
 
