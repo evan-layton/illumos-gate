@@ -993,6 +993,7 @@ struct nfs_client_id4 {
 	uint_t id_len;
 	char *id_val;
 	struct sockaddr *cl_addr;
+	int res_grp;
 };
 typedef struct nfs_client_id4 nfs_client_id4;
 

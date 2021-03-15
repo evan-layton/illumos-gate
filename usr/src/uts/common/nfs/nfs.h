@@ -1061,6 +1061,26 @@ extern void	nfsstat_zone_fini(zoneid_t, void *);
 extern void rfs_stat_zone_init(nfs_globals_t *);
 extern void rfs_stat_zone_fini(nfs_globals_t *);
 
+int	get_res_grp_id(char *srv_addr);
+void	get_cluster_id(void);
+
+#define	HA_RESGRP1_CONFIG_FILE \
+	"/etc/cluster/ccr/global/rgm_rg_defaultResourceGroup1"
+#define	HA_RESGRP2_CONFIG_FILE \
+	"/etc/cluster/ccr/global/rgm_rg_defaultResourceGroup2"
+#define	MAX_RES_GRPS 2
+#define	HA_CLUS_CONFIG_FILE "/etc/cluster/ccr/global/infrastructure"
+#define	NFS_CLUS_ID_PROP "cluster.properties.cluster_id"
+
+typedef struct cfg_entry {
+	char *file;
+	int   res_grp;
+	char *res_grp_str;
+	timestruc_t cached_time;
+} cfg_entry_t;
+
+extern cfg_entry_t cfg_map[MAX_RES_GRPS];
+
 #endif	/* _KERNEL */
 
 /*
@@ -2402,6 +2422,7 @@ extern void	rfs_free_xuio(void *);
 
 extern time_t nfs_sys_uptime(void);
 
+char	*strtok_r(char *, const char *, char **);
 char *nfs_client_name(struct svc_req *req);
 char *nfs_client_addr(struct svc_req *req, char *buf);
 char *nfs_local_addr(struct svc_req *req, char *buf);

@@ -55,7 +55,7 @@ extern uint_t nfs4_srv_vkey;
  *                   associated with the request.
  * nfs4_special1:    special READ bypass stateid.
  * nfs4_current_sid: the stateid represents the current stateid,
-                     which is whatever value is the last stateid operation.
+ *                   which is whatever value is the last stateid operation.
  * nfs4_invalid_sid: stateid represents a reserved stateid
  *                   value defined to be invalid.
  */
@@ -1678,12 +1678,22 @@ nfsclnt_compare(rfs4_entry_t entry, void *key)
 {
 	rfs4_client_t *cp = (rfs4_client_t *)entry;
 	nfs_client_id4 *nfs_client = key;
+	cid *cidp = (cid *)&cp->rc_clientid;
 
 	if (cp->rc_nfs_client.id_len != nfs_client->id_len)
 		return (FALSE);
 
-	return (bcmp(cp->rc_nfs_client.id_val, nfs_client->id_val,
-	    nfs_client->id_len) == 0);
+	if (bcmp(cp->rc_nfs_client.id_val, nfs_client->id_val,
+	    nfs_client->id_len) != 0)
+		return (FALSE);
+
+	if (!(cluster_bootflags & CLUSTER_BOOTED))
+		return (TRUE);
+
+	if ((cidp->impl_id.c_id >> CLUSTER_NODEID_SHIFT) == nfs_client->res_grp)
+		return (TRUE);
+
+	return (FALSE);
 }
 
 static void *
@@ -1822,15 +1832,16 @@ rfs4_client_create(rfs4_entry_t u_entry, void *arg)
 	cidp->impl_id.start_time = nsrv4->rfs4_start_time;
 	cidp->impl_id.c_id = (uint32_t)rfs4_dbe_getid(cp->rc_dbe);
 
-	/* If we are booted as a cluster node, embed our nodeid */
+	/* If we are booted as a cluster node, embed our resgrp id */
 	if (cluster_bootflags & CLUSTER_BOOTED)
-		embed_nodeid(cidp);
+		cidp->impl_id.c_id |= (client->res_grp << CLUSTER_NODEID_SHIFT);
 
 	/* Allocate and copy client's client id value */
 	cp->rc_nfs_client.id_val = kmem_alloc(client->id_len, KM_SLEEP);
 	cp->rc_nfs_client.id_len = client->id_len;
 	bcopy(client->id_val, cp->rc_nfs_client.id_val, client->id_len);
 	cp->rc_nfs_client.verifier = client->verifier;
+	cp->rc_nfs_client.res_grp = client->res_grp;
 
 	/* Copy client's IP address */
 	ca = client->cl_addr;
@@ -2927,29 +2938,6 @@ foreign_clientid(cid *cidp)
 	ASSERT(cluster_bootflags & CLUSTER_BOOTED);
 	return (cidp->impl_id.c_id >> CLUSTER_NODEID_SHIFT !=
 	    (uint32_t)clconf_get_nodeid());
-}
-
-/*
- * For use only when booted as a cluster node.
- * Embed our cluster nodeid into the clientid.
- */
-static void
-embed_nodeid(cid *cidp)
-{
-	int clnodeid;
-	/*
-	 * Currently, our state tables are small enough that their
-	 * ids will leave enough bits free for the nodeid. If the
-	 * tables become larger, we mustn't overwrite the id.
-	 * Equally, we only have room for so many bits of nodeid, so
-	 * must check that too.
-	 */
-	ASSERT(cluster_bootflags & CLUSTER_BOOTED);
-	ASSERT(cidp->impl_id.c_id >> CLUSTER_NODEID_SHIFT == 0);
-	clnodeid = clconf_get_nodeid();
-	ASSERT(clnodeid <= CLUSTER_MAX_NODEID);
-	ASSERT(clnodeid != NODEID_UNKNOWN);
-	cidp->impl_id.c_id |= (clnodeid << CLUSTER_NODEID_SHIFT);
 }
 
 static uint32_t

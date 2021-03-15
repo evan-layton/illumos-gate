@@ -37,6 +37,9 @@
 #include <nfs/lm.h>
 #include <sys/systeminfo.h>
 #include <sys/flock.h>
+#include <sys/cladm.h>
+
+extern char *nfs4_cluster_id;
 
 /* Helpers */
 
@@ -248,7 +251,7 @@ done:
 }
 
 static void
-rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok)
+rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok, int res_grp)
 {
 	const char *nodename = uts_nodename();
 	unsigned int nd_len = strlen(nodename);
@@ -257,17 +260,46 @@ rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok)
 	char *s = kmem_alloc(id_len, KM_SLEEP);
 	server_owner4 *so = &rok->eir_server_owner;
 	struct eir_server_scope *ss = &rok->eir_server_scope;
+	const char *res_grp_str, *id;
+	int i;
 
+	/*
+	 * For cluster we want server scope
+	 * to be different from major id.
+	 * Two nodes of cluster are not co-operating
+	 * as expected by RFC
+	 */
 	(void) memcpy(s, nodename, nd_len);
 	s[nd_len] = ' ';
 	(void) memcpy(s + nd_len + 1, hw_serial, hw_len);
-
-	so->so_major_id.so_major_id_len = id_len;
-	so->so_major_id.so_major_id_val = s;
-
 	ss->eir_server_scope_len = id_len;
 	ss->eir_server_scope_val = kmem_alloc(id_len, KM_SLEEP);
 	(void) memcpy(ss->eir_server_scope_val, s, id_len);
+
+	if (cluster_bootflags & CLUSTER_BOOTED) {
+
+		for (i = 0; i < MAX_RES_GRPS; i++)
+			if (res_grp == cfg_map[i].res_grp)
+				res_grp_str = cfg_map[i].res_grp_str;
+		VERIFY(res_grp_str != NULL);
+
+		if (curzone == global_zone) {
+			VERIFY(nfs4_cluster_id != NULL);
+			id = nfs4_cluster_id;
+		} else {
+			id = nodename;
+		}
+
+		id_len = strlen(id) + strlen(res_grp_str) + 4;
+		s = kmem_zalloc(id_len, KM_SLEEP);
+		snprintf(s, id_len, "%s_%s", id, res_grp_str);
+
+		so->so_major_id.so_major_id_len = id_len;
+		so->so_major_id.so_major_id_val = s;
+	} else {
+		so->so_major_id.so_major_id_len = id_len;
+		so->so_major_id.so_major_id_val = s;
+	}
 
 	rok->eir_server_owner.so_minor_id = 0;
 }
@@ -298,6 +330,8 @@ rfs4x_op_exchange_id(nfs_argop4 *argop, nfs_resop4 *resop,
 	nfs_client_id4		 cid; /* cip */
 	nfsstat4		status = NFS4_OK;
 	nfs4_srv_t		*nsrv4;
+	char			sbuf[INET6_ADDRSTRLEN] = {0};
+	char			*srv_addr = nfs_local_addr(req, sbuf);
 
 	DTRACE_NFSV4_2(op__exchange__id__start,
 	    struct compound_state *, cs,
@@ -322,6 +356,7 @@ rfs4x_op_exchange_id(nfs_argop4 *argop, nfs_resop4 *resop,
 	cid.id_len = cop->co_ownerid.co_ownerid_len;
 	cid.id_val = cop->co_ownerid.co_ownerid_val;
 	cid.cl_addr = (struct sockaddr *)svc_getrpccaller(req->rq_xprt)->buf;
+	cid.res_grp = get_res_grp_id(srv_addr);
 
 	/*
 	 * Refer to Section 18.35.4
@@ -517,7 +552,7 @@ out:
 	bzero(&rok->eir_server_owner, sizeof (server_owner4));
 
 	/* Add trunk handling */
-	rfs4x_set_trunkinfo(rok);
+	rfs4x_set_trunkinfo(rok, cp->rc_nfs_client.res_grp);
 
 	/*
 	 * XXX - jw - best guess
@@ -541,8 +576,19 @@ rfs4x_exchange_id_free(nfs_resop4 *resop)
 	EXCHANGE_ID4res		*resp = &resop->nfs_resop4_u.opexchange_id;
 	EXCHANGE_ID4resok	*rok = &resp->EXCHANGE_ID4res_u.eir_resok4;
 	struct server_owner4	*sop = &rok->eir_server_owner;
+	struct eir_server_scope *ss = &rok->eir_server_scope;
 	nfs_impl_id4		*nip;
 	int			 len = 0;
+
+	/*
+	 * Server scope might be same as major id
+	 * for e.g. for non cluster boot.
+	 * and hence might refer to same mem alloc.
+	 */
+	if ((len = ss->eir_server_scope_len != 0) && ss->eir_server_scope_val
+	    != sop->so_major_id.so_major_id_val) {
+		kmem_free(ss->eir_server_scope_val, len);
+	}
 
 	/* Server Owner: major */
 	if ((len = sop->so_major_id.so_major_id_len) != 0)
@@ -921,7 +967,7 @@ out:
 	rfs4_dbe_unlock(sp->sn_dbe);
 
 	if (ch != NULL) {
-		(void ) CLNT_CONTROL(ch, CLSET_CB_TEST_CLEAR, (void *)NULL);
+		(void) CLNT_CONTROL(ch, CLSET_CB_TEST_CLEAR, (void *)NULL);
 		rfs4x_cb_freech(sp, ch);
 	}
 
@@ -941,8 +987,8 @@ rfs4x_cbcheck(rfs4_state_t *sp)
 	clientid4 clid;
 
 	clid = sp->rs_owner->ro_client->rc_clientid;
-        if ((sessp = rfs4x_findsession_by_clid(clid)) == NULL)
-                return (CB_UNINIT);
+	if ((sessp = rfs4x_findsession_by_clid(clid)) == NULL)
+		return (CB_UNINIT);
 
 	if (SN_CB_CHAN_EST(sessp) && SN_CB_CHAN_OK(sessp))
 		cbs = CB_OK;
@@ -1470,8 +1516,8 @@ rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
 	stateid_t		*id;
 
 	DTRACE_NFSV4_2(op__free__stateid__start,
-		struct compound_state *, cs,
-		FREE_STATEID4args *, args);
+	    struct compound_state *, cs,
+	    FREE_STATEID4args *, args);
 
 	/* Fetch the ARG stateid */
 	sid = &args->fsa_stateid;
@@ -1485,7 +1531,7 @@ rfs4x_op_free_stateid(nfs_argop4 *argop, nfs_resop4 *resop,
 	}
 
 	id = (stateid_t *)sid;
-	switch(id->bits.type) {
+	switch (id->bits.type) {
 	case OPENID: {
 		rfs4_state_t *sp;
 
@@ -1565,8 +1611,8 @@ final:
 	*cs->statusp = resp->fsr_status = status;
 
 	DTRACE_NFSV4_2(op__free__stateid__done,
-		struct compound_state *, cs,
-		FREE_STATEID4res *, resp);
+	    struct compound_state *, cs,
+	    FREE_STATEID4res *, resp);
 }
 
 void
@@ -1621,7 +1667,7 @@ final:
 		struct compound_state *, cs,
 		BACKCHANNEL_CTL4res *, resp);
 }
- 
+
 /*
  * Validate the backchannel security part.
  * Supports only AUTH_NONE and AUTH_SYS
@@ -1632,7 +1678,7 @@ rfs4x_cbsec_valid(callback_sec_parms4 *secp)
 {
 	ASSERT(secp != NULL);
 
-	switch(secp->cb_secflavor) {
+	switch (secp->cb_secflavor) {
 	case AUTH_NONE:
 	case AUTH_SYS:
 		return (TRUE);
@@ -1738,8 +1784,8 @@ rfs4x_rs_record(struct compound_state *cs, rfs4_deleg_state_t *dsp)
 	rfs4_slot_t		*slotent;
 
 #ifdef	DEBUG_VERBOSE
-	ulong_t                  offset;
-	char                    *who;
+	ulong_t	offset;
+	char	*who;
 	who = modgetsymname((uintptr_t)caller(), &offset);
 
 	/* sessid/slot/seqid + rsid */

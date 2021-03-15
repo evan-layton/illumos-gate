@@ -95,6 +95,7 @@
 
 #define	MAXHOST 32
 const char *kinet_ntop6(uchar_t *, char *, size_t);
+char *nfs4_cluster_id;
 
 /*
  * Module linkage information.
@@ -114,6 +115,28 @@ krwlock_t	nfssrv_globals_rwl;
 
 kmem_cache_t *nfs_xuio_cache;
 int nfs_loaned_buffers = 0;
+
+cfg_entry_t cfg_map[MAX_RES_GRPS] = {
+	{ HA_RESGRP1_CONFIG_FILE,
+	    0xFA,
+	    "FA", {0, 0} },
+	{ HA_RESGRP2_CONFIG_FILE,
+	    0xFB,
+	    "FB", {0, 0} }
+};
+
+list_t ip_cache;
+krwlock_t ip_cache_lock;
+
+typedef struct ip_cache_node {
+	char			ip[INET6_ADDRSTRLEN];
+	int			res_grp;
+	list_node_t		ipc_node;
+} ip_cache_node_t;
+
+static void ip_cache_init();
+static void ip_cache_purge();
+static void ip_cache_destroy();
 
 int
 _init(void)
@@ -2576,10 +2599,6 @@ nfs_local_addr(struct svc_req *req, char *buf)
 		(void) kinet_ntop6((uchar_t *)&sin6->sin6_addr,
 		    buf, INET6_ADDRSTRLEN);
 	}
-	/*
-	 * We don't print anything in case if there is no IP
-	 * address to print.
-	 */
 
 	return (buf);
 }
@@ -2607,6 +2626,7 @@ nfs_srvinit(void)
 	rfs3_srvrinit();
 	rfs4_srvrinit();
 	nfsauth_init();
+	ip_cache_init();
 
 	/*
 	 * NFS server zone-specific global variables
@@ -2630,6 +2650,7 @@ nfs_srvfini(void)
 	 * Note the zone_fini is called for the GZ here.
 	 */
 	(void) zone_key_delete(nfssrv_zone_key);
+	ip_cache_destroy();
 
 	/* The order here is important (reverse of init) */
 	nfsauth_fini();
@@ -3436,4 +3457,268 @@ rfs_rndup_mblks(mblk_t *mp, uint_t len, int buf_loaned)
 
 	rmp->b_datap->db_type = M_DATA;
 	mp->b_cont = rmp;
+}
+
+static void
+ip_cache_init()
+{
+	/* Initialize the resource group to IP cache */
+	list_create(&ip_cache, sizeof (ip_cache_node_t),
+	    offsetof(ip_cache_node_t, ipc_node));
+
+	rw_init(&ip_cache_lock, NULL, RW_DEFAULT, NULL);
+}
+
+static void
+ip_cache_purge()
+{
+	ip_cache_node_t *node;
+
+	rw_enter(&ip_cache_lock, RW_WRITER);
+	while (node = list_head(&ip_cache)) {
+		list_remove(&ip_cache, node);
+		kmem_free(node, sizeof (ip_cache_node_t));
+	}
+	rw_exit(&ip_cache_lock);
+
+
+}
+
+static void
+ip_cache_destroy(void)
+{
+	ip_cache_purge();
+	rw_destroy(&ip_cache_lock);
+	list_destroy(&ip_cache);
+}
+
+static int
+ipcache_valid(timestruc_t cached_time, timestruc_t last_modified)
+{
+	if ((cached_time.tv_sec != last_modified.tv_sec) ||
+	    (cached_time.tv_nsec != last_modified.tv_nsec)) {
+		return (0);
+	}
+	return (1);
+}
+
+static void
+update_cached_time(int i, timestruc_t last)
+{
+	cfg_map[i].cached_time.tv_sec = last.tv_sec;
+	cfg_map[i].cached_time.tv_nsec = last.tv_nsec;
+}
+
+#define	ROOT_UID 0
+#define	ROOT_GID 0
+
+static int
+get_cfg_file_status(char *cfg_file, cred_t *cr, vnode_t **vpp, vattr_t *vattr)
+{
+	int err;
+	vnode_t *vp = NULL;
+
+	err = lookupnameatcred(cfg_file, UIO_SYSSPACE, FOLLOW, NULLVPP,
+				&vp, NULL, cr);
+	if (err != 0) {
+		crfree(cr);
+		return (err);
+	}
+
+	err = VOP_GETATTR(vp, vattr, 0, cr, NULL);
+	if (err != 0) {
+		VN_RELE(vp);
+		crfree(cr);
+		return (err);
+	}
+	*vpp = vp;
+	return (0);
+}
+
+static char *
+read_clus_config(char *cfg_file, u_offset_t *size)
+{
+	int error_no;
+	long	read_size;
+	vnode_t *vp = NULL;
+	vattr_t vattr;
+	char *buffer = NULL;
+	char *buf, *ebuf;
+	cred_t  *cr;
+
+	*size = 0;
+	cr = crget();
+
+	error_no = get_cfg_file_status(cfg_file, cr, &vp, &vattr);
+	if (error_no != 0)
+		return (NULL);
+
+	*size = vattr.va_size;
+
+	/* increase size by one to accomodate a NULL charecter */
+	*size = *size+1;
+	buffer = kmem_alloc(*size, KM_SLEEP);
+
+	/* Need privileges to read config file */
+	(void) crsetugid(cr, ROOT_UID, ROOT_GID);
+
+	error_no = vn_rdwr(UIO_READ, vp, buffer, *size, 0,
+	    UIO_SYSSPACE, 0, (rlim64_t)0, cr, &read_size);
+	VN_RELE(vp);
+	if (error_no != 0) {
+		kmem_free(buffer, *size);
+		crfree(cr);
+		return (NULL);
+	}
+	buffer[*size-1] = '\0';
+	/*
+	 * strstr bails out the moment it encounters a new line character,
+	 * replacing all the new lines with a delimiter would help in searching
+	 * the entire file.
+	 */
+	buf = buffer;
+	/* Ignore the last two charecters, i.e. EOF and NULL */
+	ebuf = (buf + (*size-2));
+	while (buf < ebuf) {
+		if (*buf == '\0' || *buf == '\n')
+			*buf = '|';
+		buf++;
+	}
+	crfree(cr);
+	return (buffer);
+}
+
+/*
+ * Return the Resource Group Id corresponding to the data if match found or
+ * 0xFF if there is no match.
+ * We need additional delimiter bytes in case of IP token search to extract
+ * it correctly.
+ */
+static int
+ha_get_res_grp(char *data, char *delim)
+{
+	char *rg_cfg = NULL;
+	u_offset_t  rg_cfg_size = 0;
+	int  i, res_grp = 0xFF;
+	char *token, *p, *lasts;
+
+	ASSERT(data != NULL);
+
+	for (i = 0; i < MAX_RES_GRPS; i++) {
+		rg_cfg = read_clus_config(cfg_map[i].file, &rg_cfg_size);
+		if (rg_cfg != NULL) {
+			p = rg_cfg;
+			while ((token = strtok_r(p, delim, &lasts)) != NULL) {
+				if (strcmp(token, data) == 0) {
+					res_grp = cfg_map[i].res_grp;
+					kmem_free(rg_cfg, rg_cfg_size);
+					return (res_grp);
+				}
+				p = NULL;
+			}
+		}
+		kmem_free(rg_cfg, rg_cfg_size);
+	}
+	return (res_grp);
+}
+
+static int
+lookup_ip_cache(char *srv_ip)
+{
+	ip_cache_node_t *node, *new_node;
+	int res_grp = 0xFF;
+	char *delim = " ,;=|\t\n";
+	cred_t *cr;
+	vnode_t *vp = NULL;
+	vattr_t vattr;
+	int i;
+
+	cr = crget();
+
+	/*
+	 * Before looking up the cache, check if ipcache is valid or not.
+	 * If it is invalid, purge the cache and reset the cached time.
+	 */
+	for (i = 0; i < MAX_RES_GRPS; i++) {
+		if (get_cfg_file_status(cfg_map[i].file, cr, &vp, &vattr) != 0)
+			return (res_grp);
+		if (!ipcache_valid(cfg_map[i].cached_time, vattr.va_mtime)) {
+			ip_cache_purge();
+			update_cached_time(i, vattr.va_mtime);
+		}
+		VN_RELE(vp);
+	}
+	crfree(cr);
+
+	/* look up in the cache */
+	rw_enter(&ip_cache_lock, RW_READER);
+	for (node = list_head(&ip_cache); node != NULL;
+		node = list_next(&ip_cache, node)) {
+		if (strcmp(srv_ip, node->ip) == 0) {
+			res_grp = node->res_grp;
+			rw_exit(&ip_cache_lock);
+			return (res_grp);
+		}
+	}
+	rw_exit(&ip_cache_lock);
+
+	new_node = kmem_zalloc(sizeof (ip_cache_node_t), KM_SLEEP);
+	strcpy(new_node->ip, srv_ip);
+	res_grp = new_node->res_grp = ha_get_res_grp(srv_ip, delim);
+
+	rw_enter(&ip_cache_lock, RW_WRITER);
+	for (node = list_head(&ip_cache); node != NULL;
+		node = list_next(&ip_cache, node)) {
+		if (strcmp(srv_ip, node->ip) == 0) {
+			rw_exit(&ip_cache_lock);
+			kmem_free(new_node, sizeof (ip_cache_node_t));
+			return (res_grp);
+		}
+	}
+	list_insert_tail(&ip_cache, new_node);
+	rw_exit(&ip_cache_lock);
+
+	return (res_grp);
+}
+
+int
+get_res_grp_id(char *srv_ip)
+{
+	if (cluster_bootflags & CLUSTER_BOOTED)
+		return (lookup_ip_cache(srv_ip));
+	return (0);
+}
+
+void
+get_cluster_id(void)
+{
+	char *cinfra_cfg = NULL;
+	u_offset_t  cinfra_cfg_size = 0;
+	char *token, *p, *lasts;
+	char *delim = " |\t\n";
+
+	cinfra_cfg = read_clus_config(HA_CLUS_CONFIG_FILE, &cinfra_cfg_size);
+	if (cinfra_cfg == NULL) {
+		cmn_err(CE_WARN, "get_cluster_id: unable to read config\n");
+		return;
+	}
+
+	p = cinfra_cfg;
+	while ((token = strtok_r(p, delim, &lasts)) != NULL) {
+		if (strcmp(token, NFS_CLUS_ID_PROP) == 0) {
+			p = NULL;
+			if ((token = strtok_r(p, delim, &lasts))
+			    != NULL) {
+				nfs4_cluster_id = kmem_alloc(strlen(token)+1,
+				    KM_SLEEP);
+				strcpy(nfs4_cluster_id, token);
+			}
+			break;
+		}
+		p = NULL;
+	}
+	kmem_free(cinfra_cfg, cinfra_cfg_size);
+	if (nfs4_cluster_id == NULL)
+		cmn_err(CE_NOTE, "get_cluster_id: %s\n",
+		    nfs4_cluster_id == NULL?"not found":nfs4_cluster_id);
 }

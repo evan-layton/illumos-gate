@@ -87,6 +87,7 @@
 
 #include <sys/tsol/label.h>
 #include <sys/tsol/tndb.h>
+#include <sys/cladm.h>
 
 #define	RFS4_MAXLOCK_TRIES 4	/* Try to get the lock this many times */
 static int rfs4_maxlock_tries = RFS4_MAXLOCK_TRIES;
@@ -97,6 +98,7 @@ extern int nfs_loaned_buffers;
 /* End of Tunables */
 
 static int rdma_setup_read_data4(READ4args *, READ4res *);
+extern char *nfs4_cluster_id;
 
 /*
  * Used to bump the stateid4.seqid value and show changes in the stateid
@@ -759,6 +761,15 @@ rfs4_do_server_start(int server_upordown,
 			    rfs4_dss_newpaths);
 		}
 	}
+	if (curzone == global_zone && cluster_bootflags & CLUSTER_BOOTED) {
+		/*
+		 * We don't expect cluster.properties.cluster_id
+		 * to change without a reboot?
+		 */
+		if (nfs4_cluster_id == NULL) {
+			get_cluster_id();
+		}
+	}
 
 	/* Check if delegation is to be enabled */
 	if (srv_delegation != FALSE)
@@ -1060,7 +1071,7 @@ rfs4_servinst(rfs4_client_t *cp)
 rfs4_cbstate_t
 rfs4_cbcheck(rfs4_state_t *sp)
 {
-        return (sp->rs_owner->ro_client->rc_cbinfo.cb_state);
+	return (sp->rs_owner->ro_client->rc_cbinfo.cb_state);
 }
 
 /* ARGSUSED */
@@ -7205,8 +7216,8 @@ rfs4_do_open(struct compound_state *cs, struct svc_req *req,
 		open_delegation4 *delegation = &resp->delegation;
 		delegation->delegation_type = OPEN_DELEGATE_NONE_EXT;
 		delegation->
-		      open_delegation4_u.od_whynone.ond_why = WND4_NOT_WANTED;
-        }
+		    open_delegation4_u.od_whynone.ond_why = WND4_NOT_WANTED;
+	}
 
 	rfs4_file_rele(fp);
 	rfs4_state_rele(sp);
@@ -7231,7 +7242,7 @@ rfs4_do_openfh(struct compound_state *cs, struct svc_req *req, OPEN4args *args,
 	}
 	rfs4_do_open(cs, req, oo, deleg,
 	    (args->share_access & 0xff), args->share_deny, resp, 0,
-	     !rfs4_has_session(cs));
+	    !rfs4_has_session(cs));
 }
 
 /*ARGSUSED*/
@@ -8332,7 +8343,8 @@ rfs4_op_setclientid(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_client_t *cp, *newcp, *cp_confirmed, *cp_unconfirmed;
 	rfs4_clntip_t *ci;
 	bool_t create;
-	char *addr, *netid;
+	char *addr, *netid, *srv_addr;
+	char sbuf[INET6_ADDRSTRLEN] = {0};
 	int len;
 
 	DTRACE_NFSV4_2(op__setclientid__start, struct compound_state *, cs,
@@ -8365,6 +8377,8 @@ retry:
 	 * In search of an EXISTING client matching the incoming
 	 * request to establish a new client identifier at the server
 	 */
+	srv_addr = nfs_local_addr(req, sbuf);
+	args->client.res_grp = get_res_grp_id(srv_addr);
 	create = TRUE;
 	cp = rfs4_findclient(&args->client, &create, NULL);
 

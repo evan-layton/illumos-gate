@@ -2962,8 +2962,8 @@ decode_fh(void *fh, struct svc_req *req)
 void prnt_estale_err_msg(char *op_name, enum fhtovp_error reason,
     struct svc_req *req, nfs_fh3 *fh)
 {
-	char cbuf[INET6_ADDRSTRLEN];
-	char sbuf[INET6_ADDRSTRLEN];
+	char cbuf[INET6_ADDRSTRLEN] = {0};
+	char sbuf[INET6_ADDRSTRLEN] = {0};
 	char *client_addr = nfs_client_addr(req, cbuf);
 	char *srv_addr = nfs_local_addr(req, sbuf);
 	int is_unexported = 0;
