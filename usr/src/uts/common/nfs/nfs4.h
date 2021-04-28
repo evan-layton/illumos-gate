@@ -1568,12 +1568,13 @@ nfsstat4 do_rfs4_op_secinfo(struct compound_state *, char *, SECINFO4res *);
 
 extern void	rfs4_do_server_start(int, int, int);
 extern void	rfs4_compound(COMPOUND4args *, COMPOUND4res *,
-			compound_state_t *, struct svc_req *, int *);
+			compound_state_t *, struct svc_req *, int *, cred_t *);
 extern void rfs4_init_compound_state(struct compound_state *);
 extern void rfs4_fini_compound_state(struct compound_state *);
 
 struct rpcdisp;
-extern int rfs4_dispatch(struct rpcdisp *, struct svc_req *, SVCXPRT *, char *);
+extern int rfs4_dispatch(struct rpcdisp *, struct svc_req *, SVCXPRT *, char *,
+    cred_t *);
 extern void	rfs4_compound_free(COMPOUND4res *);
 extern void	rfs4_compound_flagproc(COMPOUND4args *, int *);
 

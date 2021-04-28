@@ -357,6 +357,59 @@ nfsauth4_access(struct exportinfo *exi, vnode_t *vp, struct svc_req *req,
 	return (access);
 }
 
+void
+nfs4auth_reset_aumask(cred_t *cr)
+{
+	auditinfo_addr_t *au;
+
+	if (!AU_ZONE_AUDITING(NULL))
+		return;
+
+	if ((au = crgetauinfo_modifiable(cr)) != NULL) {
+		au->ai_mask.as_success = 0;
+		au->ai_mask.as_failure = 0;
+	}
+}
+
+int
+nfs4auth_getauditinfo(struct svc_req *req, cred_t *cr)
+{
+	auditinfo_addr_t *au;
+
+	if (!AU_ZONE_AUDITING(NULL))
+		return (1);
+
+	au = crgetauinfo_modifiable(cr);
+	if (au == NULL)
+		return (0);
+
+	if (!nfsauth_cache_getauditinfo(req, cr, &au->ai_auid,
+	    &au->ai_mask, &au->ai_asid))
+		return (0);
+
+	struct sockaddr *sa;
+	sa = (struct sockaddr *)svc_getrpccaller(req->rq_xprt)->buf;
+
+	if (sa == NULL)
+		return (0);
+
+	if (sa->sa_family == AF_INET) {
+		au->ai_termid.at_addr[0] =
+		    ((struct sockaddr_in *)sa)->sin_addr.s_addr;
+		au->ai_termid.at_port =
+		    ntohs(((struct sockaddr_in *)sa)->sin_port);
+		au->ai_termid.at_type = AU_IPv4;
+	} else {
+		bcopy(&((struct sockaddr_in6 *)sa)->sin6_addr,
+		    au->ai_termid.at_addr, sizeof (in6_addr_t));
+		au->ai_termid.at_port =
+		    ntohs(((struct sockaddr_in6 *)sa)->sin6_port);
+		au->ai_termid.at_type = AU_IPv6;
+	}
+
+	return (1);
+}
+
 static void
 sys_log(const char *msg)
 {
@@ -963,6 +1016,9 @@ nfsauth_cache_get(struct exportinfo *exi, struct svc_req *req, int flavor,
 
 	ASSERT(c != NULL);
 
+	ac.auth_flavor = flavor;
+	ac.auth_clnt_cred = cr;
+
 	rw_enter(&c->authc_lock, RW_READER);
 	p = (struct auth_cache *)avl_find(&c->authc_tree, &ac, NULL);
 
@@ -983,9 +1039,7 @@ nfsauth_cache_get(struct exportinfo *exi, struct svc_req *req, int flavor,
 		 */
 		np->auth_clnt = c;
 		np->auth_flavor = flavor;
-		np->auth_clnt_cred = ac.auth_clnt_cred;
-		np->auth_srv_ngids = 0;
-		np->auth_srv_gids = NULL;
+		np->auth_clnt_cred = crdup(cr);
 		np->auth_time = np->auth_freshness = gethrestime_sec();
 		np->auth_state = NFS_AUTH_NEW;
 		mutex_init(&np->auth_lock, NULL, MUTEX_DEFAULT, NULL);
@@ -1004,12 +1058,11 @@ nfsauth_cache_get(struct exportinfo *exi, struct svc_req *req, int flavor,
 
 			cv_destroy(&np->auth_cv);
 			mutex_destroy(&np->auth_lock);
-			crfree(ac.auth_clnt_cred);
-			kmem_cache_free(exi_cache_handle, np);
+			crfree(np->auth_clnt_cred);
+			kmem_cache_free(nfsauth_cache_handle, np);
 		}
 	} else {
-		rw_exit(&exi->exi_cache_lock);
-		crfree(ac.auth_clnt_cred);
+		rw_exit(cache_lock);
 	}
 
 	mutex_enter(&p->auth_lock);
@@ -1212,7 +1265,6 @@ nfsauth_cache_get(struct exportinfo *exi, struct svc_req *req, int flavor,
 	return (access);
 
 retrieve:
-	crfree(ac.auth_clnt_cred);
 
 	/*
 	 * Retrieve the required data without caching.

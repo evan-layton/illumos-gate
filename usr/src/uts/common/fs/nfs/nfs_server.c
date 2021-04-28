@@ -1586,11 +1586,31 @@ common_dispatch(struct svc_req *req, SVCXPRT *xprt, rpcvers_t min_vers,
 		}
 	}
 
+	cr = xprt->xp_cred;
+	ASSERT(cr != NULL);
+#ifdef DEBUG
+	{
+		if (crgetref(cr) != 1) {
+			crfree(cr);
+			cr = crget();
+			xprt->xp_cred = cr;
+			cred_misses++;
+		} else
+			cred_hits++;
+	}
+#else
+	if (crgetref(cr) != 1) {
+		crfree(cr);
+		cr = crget();
+		xprt->xp_cred = cr;
+	}
+#endif
+
 	/*
 	 * If Version 4 use that specific dispatch function.
 	 */
 	if (req->rq_vers == 4) {
-		error += rfs4_dispatch(disp, req, xprt, args);
+		error += rfs4_dispatch(disp, req, xprt, args, cr);
 		goto done;
 	}
 
@@ -1647,26 +1667,6 @@ common_dispatch(struct svc_req *req, SVCXPRT *xprt, rpcvers_t min_vers,
 			anon_ok = 1;
 		else
 			anon_ok = 0;
-
-		cr = xprt->xp_cred;
-		ASSERT(cr != NULL);
-#ifdef DEBUG
-		{
-			if (crgetref(cr) != 1) {
-				crfree(cr);
-				cr = crget();
-				xprt->xp_cred = cr;
-				cred_misses++;
-			} else
-				cred_hits++;
-		}
-#else
-		if (crgetref(cr) != 1) {
-			crfree(cr);
-			cr = crget();
-			xprt->xp_cred = cr;
-		}
-#endif
 
 		exi = checkexport(fsid, xfid);
 
@@ -3519,7 +3519,7 @@ get_cfg_file_status(char *cfg_file, cred_t *cr, vnode_t **vpp, vattr_t *vattr)
 	vnode_t *vp = NULL;
 
 	err = lookupnameatcred(cfg_file, UIO_SYSSPACE, FOLLOW, NULLVPP,
-				&vp, NULL, cr);
+	    &vp, NULL, cr);
 	if (err != 0) {
 		crfree(cr);
 		return (err);
@@ -3653,7 +3653,7 @@ lookup_ip_cache(char *srv_ip)
 	/* look up in the cache */
 	rw_enter(&ip_cache_lock, RW_READER);
 	for (node = list_head(&ip_cache); node != NULL;
-		node = list_next(&ip_cache, node)) {
+	    node = list_next(&ip_cache, node)) {
 		if (strcmp(srv_ip, node->ip) == 0) {
 			res_grp = node->res_grp;
 			rw_exit(&ip_cache_lock);
@@ -3668,7 +3668,7 @@ lookup_ip_cache(char *srv_ip)
 
 	rw_enter(&ip_cache_lock, RW_WRITER);
 	for (node = list_head(&ip_cache); node != NULL;
-		node = list_next(&ip_cache, node)) {
+	    node = list_next(&ip_cache, node)) {
 		if (strcmp(srv_ip, node->ip) == 0) {
 			rw_exit(&ip_cache_lock);
 			kmem_free(new_node, sizeof (ip_cache_node_t));

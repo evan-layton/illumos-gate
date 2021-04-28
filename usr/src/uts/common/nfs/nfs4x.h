@@ -239,7 +239,7 @@ typedef struct {
 } cred_set_t;
 
 /* NFSv4.1 Functions */
-extern int rfs4x_dispatch(struct svc_req *, SVCXPRT *, char *);
+extern int rfs4x_dispatch(struct svc_req *, SVCXPRT *, char *, cred_t *);
 
 void rfs4_free_cred_set(cred_set_t *);
 void rfs4x_session_rele(rfs4_session_t *);
@@ -273,7 +273,7 @@ extern void rfs4x_cbsec_init(callback_sec_parms4 *, callback_sec_parms4 *);
 extern void rfs4x_cbsec_fini(rfs4_session_t *);
 extern uid_t rfs4x_cbsec_getuid(callback_sec_parms4 *);
 extern gid_t rfs4x_cbsec_getgid(callback_sec_parms4 *);
-extern sess_channel_t * rfs41_create_session_channel(channel_dir_from_server4);
+extern sess_channel_t *rfs41_create_session_channel(channel_dir_from_server4);
 extern void rfs41_destroy_back_channel(sess_channel_t *);
 extern slotid4 svc_slot_maxslot(rfs4_session_t *);
 extern nfsstat4 slot_cb_status(stok_t *);

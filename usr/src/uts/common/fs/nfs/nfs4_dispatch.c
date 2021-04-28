@@ -373,7 +373,7 @@ rfs4_find_dr(struct svc_req *req, rfs4_drc_t *drc, rfs4_dupreq_t **dup)
  *
  */
 int
-rfs40_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap)
+rfs40_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap, cred_t *cr)
 {
 
 	COMPOUND4res	 res_buf;
@@ -431,7 +431,7 @@ rfs40_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap)
 		case NFS4_DUP_NEW:
 			curthread->t_flag |= T_DONTPEND;
 			/* NON-IDEMPOTENT proc call */
-			rfs4_compound(cap, rbp, &cs, req, &rv);
+			rfs4_compound(cap, rbp, &cs, req, &rv, cr);
 			curthread->t_flag &= ~T_DONTPEND;
 
 			rfs4_fini_compound_state(&cs);
@@ -466,7 +466,7 @@ rfs40_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap)
 	} else {
 		curthread->t_flag |= T_DONTPEND;
 		/* IDEMPOTENT proc call */
-		rfs4_compound(cap, rbp, &cs, req, &rv);
+		rfs4_compound(cap, rbp, &cs, req, &rv, cr);
 		curthread->t_flag &= ~T_DONTPEND;
 
 		rfs4_fini_compound_state(&cs);
@@ -623,7 +623,7 @@ rfs4_resource_err(struct svc_req *req, COMPOUND4args *argsp)
 /* ARGSUSED */
 int
 rfs4_dispatch(struct rpcdisp *disp, struct svc_req *req,
-    SVCXPRT *xprt, char *ap)
+    SVCXPRT *xprt, char *ap, cred_t *cr)
 {
 	COMPOUND4args	*cmp;
 	int error = 0;
@@ -641,11 +641,11 @@ rfs4_dispatch(struct rpcdisp *disp, struct svc_req *req,
 	switch (cmp->minorversion) {
 	case 1:
 	case 2:
-		error = rfs4x_dispatch(req, xprt, ap);
+		error = rfs4x_dispatch(req, xprt, ap, cr);
 		break;
 
 	case 0:
-		error = rfs40_dispatch(req, xprt, ap);
+		error = rfs40_dispatch(req, xprt, ap, cr);
 		break;
 
 	default:

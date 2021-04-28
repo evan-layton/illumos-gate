@@ -111,7 +111,7 @@ xdr_compound_wrapper(XDR *xdrs, compound_state_t *cs)
 }
 
 int
-rfs4x_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap)
+rfs4x_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap, cred_t *cr)
 {
 	struct compound_state cs;
 	COMPOUND4res res_buf;
@@ -143,7 +143,7 @@ rfs4x_dispatch(struct svc_req *req, SVCXPRT *xprt, char *ap)
 
 	/* Regular processing */
 	curthread->t_flag |= T_DONTPEND;
-	rfs4_compound(cap, rbp, &cs, req, &rpcerr);
+	rfs4_compound(cap, rbp, &cs, req, &rpcerr, cr);
 	curthread->t_flag &= ~T_DONTPEND;
 
 	/*

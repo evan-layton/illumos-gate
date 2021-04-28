@@ -805,10 +805,6 @@ rfs4_fini_compound_state(struct compound_state *cs)
 	if (cs->saved_fh.nfs_fh4_val) {
 		kmem_free(cs->saved_fh.nfs_fh4_val, NFS4_FHSIZE);
 	}
-
-	if (cs->basecr) {
-		crfree(cs->basecr);
-	}
 	if (cs->sp) {
 		rfs4x_session_rele(cs->sp);
 	}
@@ -6028,10 +6024,9 @@ rfs4_opnum_in_range(const compound_state_t *cs, int opnum)
 
 void
 rfs4_compound(COMPOUND4args *args, COMPOUND4res *resp, compound_state_t *cs,
-    struct svc_req *req, int *rv)
+    struct svc_req *req, int *rv, cred_t *cr)
 {
 	uint_t i;
-	cred_t *cr;
 	nfs4_srv_t *nsrv4;
 	nfs_export_t *ne = nfs_get_export();
 
@@ -6068,18 +6063,16 @@ rfs4_compound(COMPOUND4args *args, COMPOUND4res *resp, compound_state_t *cs,
 		return;
 	}
 
-	cr = crget();
-	ASSERT(cr != NULL);
-
-	if (sec_svc_getcred(req, cr, &cs->principal, &cs->nfsflavor) == 0) {
+	if (sec_svc_getcred(req, cr, &cs->principal, &cs->nfsflavor) == 0 ||
+	    nfs4auth_getauditinfo(req, cr) == 0) {
 		DTRACE_NFSV4_2(compound__start, struct compound_state *,
 		    cs, COMPOUND4args *, args);
-		crfree(cr);
 		DTRACE_NFSV4_2(compound__done, struct compound_state *,
 		    cs, COMPOUND4res *, resp);
 		svcerr_badcred(req->rq_xprt);
 		if (rv != NULL)
 			*rv = 1;
+		nfs4auth_reset_aumask(cr);
 		return;
 	}
 
@@ -6190,6 +6183,8 @@ rfs4_compound(COMPOUND4args *args, COMPOUND4res *resp, compound_state_t *cs,
 		kmem_free(req->rq_label, sizeof (bslabel_t));
 		req->rq_label = NULL;
 	}
+
+	nfs4auth_reset_aumask(cr);
 }
 
 /*
