@@ -257,7 +257,7 @@ rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok, int res_grp)
 	unsigned int nd_len = strlen(nodename);
 	unsigned int hw_len = strlen(hw_serial);
 	unsigned id_len = nd_len + 1 + hw_len;
-	char *s = kmem_alloc(id_len, KM_SLEEP);
+	char *s, *cs;
 	server_owner4 *so = &rok->eir_server_owner;
 	struct eir_server_scope *ss = &rok->eir_server_scope;
 	const char *res_grp_str, *id;
@@ -269,12 +269,12 @@ rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok, int res_grp)
 	 * Two nodes of cluster are not co-operating
 	 * as expected by RFC
 	 */
+	s = kmem_alloc(id_len, KM_SLEEP);
 	(void) memcpy(s, nodename, nd_len);
 	s[nd_len] = ' ';
 	(void) memcpy(s + nd_len + 1, hw_serial, hw_len);
 	ss->eir_server_scope_len = id_len;
-	ss->eir_server_scope_val = kmem_alloc(id_len, KM_SLEEP);
-	(void) memcpy(ss->eir_server_scope_val, s, id_len);
+	ss->eir_server_scope_val = s;
 
 	if (cluster_bootflags & CLUSTER_BOOTED) {
 
@@ -291,14 +291,16 @@ rfs4x_set_trunkinfo(EXCHANGE_ID4resok *rok, int res_grp)
 		}
 
 		id_len = strlen(id) + strlen(res_grp_str) + 4;
-		s = kmem_zalloc(id_len, KM_SLEEP);
-		snprintf(s, id_len, "%s_%s", id, res_grp_str);
+		cs = kmem_zalloc(id_len, KM_SLEEP);
+		snprintf(cs, id_len, "%s_%s", id, res_grp_str);
 
 		so->so_major_id.so_major_id_len = id_len;
-		so->so_major_id.so_major_id_val = s;
+		so->so_major_id.so_major_id_val = cs;
 	} else {
+		cs = kmem_zalloc(id_len, KM_SLEEP);
+		(void) memcpy(cs, s, id_len);
 		so->so_major_id.so_major_id_len = id_len;
-		so->so_major_id.so_major_id_val = s;
+		so->so_major_id.so_major_id_val = cs;
 	}
 
 	rok->eir_server_owner.so_minor_id = 0;
@@ -580,13 +582,7 @@ rfs4x_exchange_id_free(nfs_resop4 *resop)
 	nfs_impl_id4		*nip;
 	int			 len = 0;
 
-	/*
-	 * Server scope might be same as major id
-	 * for e.g. for non cluster boot.
-	 * and hence might refer to same mem alloc.
-	 */
-	if ((len = ss->eir_server_scope_len != 0) && ss->eir_server_scope_val
-	    != sop->so_major_id.so_major_id_val) {
+	if ((len = ss->eir_server_scope_len) != 0) {
 		kmem_free(ss->eir_server_scope_val, len);
 	}
 
@@ -1627,8 +1623,8 @@ rfs4x_op_backchannel_ctl(nfs_argop4 *argop, nfs_resop4 *resop,
 	ASSERT(sp != NULL);
 
 	DTRACE_NFSV4_2(op__backchannel__ctl__start,
-		struct compound_state *, cs,
-		BACKCHANNEL_CTL4args *, args);
+	    struct compound_state *, cs,
+	    BACKCHANNEL_CTL4args *, args);
 
 	if ((args->bca_sec_parms.bca_sec_parms_len == 0) ||
 	    (args->bca_sec_parms.bca_sec_parms_val == NULL)) {
@@ -1664,8 +1660,8 @@ final:
 	*cs->statusp = resp->bcr_status = status;
 
 	DTRACE_NFSV4_2(op__backchannel__ctl__done,
-		struct compound_state *, cs,
-		BACKCHANNEL_CTL4res *, resp);
+	    struct compound_state *, cs,
+	    BACKCHANNEL_CTL4res *, resp);
 }
 
 /*
