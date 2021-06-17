@@ -2790,7 +2790,7 @@ checkexport4(fsid_t *fsid, fid_t *fid, vnode_t *vp)
 	if (exi == NULL) {
 		for (exi = ne->ps_exptable[exptablehash(fsid, fid)];
 		    exi != NULL;
-		    exi = exi->fid_hash.next) {
+		    exi = exi->ps_fid_hash.next) {
 			if (ps_exportmatch(exi, fsid, fid)) {
 				/*
 				 * If this is the place holder for the
