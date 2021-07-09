@@ -7174,8 +7174,8 @@ rfs4_do_open(struct compound_state *cs, struct svc_req *req,
 			rfs4_dbe_rele(fp->rf_dbe);
 			return;
 		}
-		rfs4_dbe_lock(fp->rf_dbe);
 		rfs4_dbe_rele(fp->rf_dbe);
+		rfs4_dbe_lock(fp->rf_dbe);
 	} else { /* open upgrade */
 		/*
 		 * calculate the fflags for the new mode that is being added
