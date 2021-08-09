@@ -19,10 +19,6 @@
 
 #include "common.h"
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int nfs_mntinfo_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern void nfs_mntinfo_help(void);
 extern int nfs_servinfo_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
@@ -75,8 +71,4 @@ extern void nfs_acache4_walk_fini(mdb_walk_state_t *);
 extern int nfs_acache4_rnode_walk_init(mdb_walk_state_t *);
 extern int nfs_acache4_rnode_walk_step(mdb_walk_state_t *);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _NFS_CLNT_H_ */
+#endif	/* _NFS_CLNT_H */

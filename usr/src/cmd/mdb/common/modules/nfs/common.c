@@ -65,7 +65,7 @@ zoned_get_zsd(uintptr_t zonep, char *key_str, uintptr_t *result)
 	cbd.found = FALSE;
 
 	if (mdb_pwalk("zsd", zoned_find_zsd_cb, &cbd, zonep) != 0) {
-		mdb_warn("failed to walk zsd\n");
+		mdb_warn("failed to walk zsd");
 		return (DCMD_ERR);
 	}
 

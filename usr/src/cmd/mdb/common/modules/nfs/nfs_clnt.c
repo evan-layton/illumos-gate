@@ -150,7 +150,7 @@ static const struct {
 	TBL_ENTRY(NR_LOST_STATE_RQST),
 	TBL_ENTRY(NR_STALE),
 	TBL_ENTRY(NR_MOVED),
-	{NULL}
+	NULL
 };
 
 static const char *
@@ -234,8 +234,7 @@ static const struct {
 	TBL_ENTRY(NFS4ERR_DEADLOCK),
 	TBL_ENTRY(NFS4ERR_FILE_OPEN),
 	TBL_ENTRY(NFS4ERR_ADMIN_REVOKED),
-	TBL_ENTRY(NFS4ERR_CB_PATH_DOWN),
-	{NULL}
+	TBL_ENTRY(NFS4ERR_CB_PATH_DOWN)
 };
 
 static const char *
@@ -314,7 +313,7 @@ static const struct {
 	{"setclientid_confirm", TAG_SETCLIENTID_CF},
 	{"symlink", TAG_SYMLINK},
 	{"write", TAG_WRITE},
-	{NULL}
+	{NULL, 0}
 };
 
 static const char *
@@ -356,7 +355,7 @@ static const mdb_bitmask_t nfs_mi_flags[] = {
 	{"MI_EXTATTR", MI_EXTATTR, MI_EXTATTR},
 	{"MI_ASYNC_MGR_STOP", MI_ASYNC_MGR_STOP, MI_ASYNC_MGR_STOP},
 	{"MI_DEAD", MI_DEAD, MI_DEAD},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 static int
@@ -463,7 +462,7 @@ nfs_print_mntinfo_cb(uintptr_t addr, const void *data, void *cb_data)
 			break;
 		}
 
-		if (mi->mi_async_reqs[i] != NULL && mdb_pwalk("nfs_async",
+		if (mi->mi_async_reqs[i] == NULL || mdb_pwalk("nfs_async",
 		    walk_count_cb, &count, (uintptr_t)mi->mi_async_reqs[i])
 		    == -1)
 			mdb_printf("\t%s = ??", opname);
@@ -639,7 +638,7 @@ static const mdb_bitmask_t nfs_mi4_flags[] = {
 	{"MI4_BADOWNER_DEBUG", MI4_BADOWNER_DEBUG, MI4_BADOWNER_DEBUG},
 	{"MI4_ASYNC_MGR_STOP", MI4_ASYNC_MGR_STOP, MI4_ASYNC_MGR_STOP},
 	{"MI4_TIMEDOUT", MI4_TIMEDOUT, MI4_TIMEDOUT},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 static const mdb_bitmask_t nfs_mi4_recovflags[] = {
@@ -652,7 +651,7 @@ static const mdb_bitmask_t nfs_mi4_recovflags[] = {
 	{"MI4R_LOST_STATE", MI4R_LOST_STATE, MI4R_LOST_STATE},
 	{"MI4R_BAD_SEQID", MI4R_BAD_SEQID, MI4R_BAD_SEQID},
 	{"MI4R_MOVED", MI4R_MOVED, MI4R_MOVED},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 int
@@ -790,17 +789,12 @@ nfs4_mntinfo_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		mdb_dec_indent(2);
 	}
 
-	if (opt_m || opt_v) {
-		/* TODO */
-	}
-
 	return (DCMD_OK);
 }
 
 void
 nfs4_mntinfo_help(void)
 {
-	/* TODO */
 	mdb_printf("<mntinfo4>::nfs4_mntinfo  -> gives mntinfo4_t information\n"
 	    "          ::nfs4_mntinfo  -> walks thru all NFSv4 mntinfo4_t\n"
 	    "Each of these formats also takes the following argument\n"
@@ -912,7 +906,7 @@ static const mdb_bitmask_t nfs4_si_flags[] = {
 	{"N4S_CB_WAITER", N4S_CB_WAITER, N4S_CB_WAITER},
 	{"N4S_INSERTED", N4S_INSERTED, N4S_INSERTED},
 	{"N4S_BADOWNER_DEBUG", N4S_BADOWNER_DEBUG, N4S_BADOWNER_DEBUG},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 int
@@ -1027,8 +1021,8 @@ void
 nfs4_server_info_help(void)
 {
 	mdb_printf(
-	    "-c       assumes client is Solaris NFSv4 Client\n"
-	    "-s       assumes server is Solaris NFSv4 Server\n"
+	    "-c       assumes client is NexentaStor NFSv4 Client\n"
+	    "-s       assumes server is NexentaStor NFSv4 Server\n"
 	    "\n"
 	    "The -c option enables the dcmd to decode the client generated\n"
 	    "structure CLIDtoSend that is normally opaque to the server.\n"
@@ -1181,12 +1175,11 @@ mimsg_print_event(const nfs4_debug_msg_t *msg)
 			    msg_srv);
 		break;
 	case RE_FILE_DIFF:
-		/* TODO */
-		mdb_printf("Replicas %s and %s: file %s(%p) not same");
+		mdb_printf("Replicas %s and %s: file %s(%p) not same",
+		    msg_srv, msg_mntpt, ep->re_char1, (void *)ep->re_rp1);
 		break;
 	case RE_LOST_STATE:
 		/*
-		 * TODO:
 		 * if char1 is null you should use ::nfs4_fname for re_rp1
 		 */
 		mdb_printf("client has a lost %s request for rnode_pt1 %s "
@@ -1195,8 +1188,10 @@ mimsg_print_event(const nfs4_debug_msg_t *msg)
 		    ep->re_rp2, msg_mntpt, msg_srv);
 		break;
 	case RE_OPENS_CHANGED:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("Recovery: number of open files changed "
+                    "for mount %s (0x%p) (old %d, new %d) on server %s\n",
+                    msg_mntpt, (void *)ep->re_mi, ep->re_uint, ep->re_pid,
+		    msg_srv);
 		break;
 	case RE_SIGLOST:
 	case RE_SIGLOST_NO_DUMP:
@@ -1212,31 +1207,44 @@ mimsg_print_event(const nfs4_debug_msg_t *msg)
 		    ep->re_rp1, char2p, ep->re_rp2);
 		break;
 	case RE_UNEXPECTED_ACTION:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("Recovery, unexpected action (%d) on server %s\n",
+		    ep->re_uint, msg_srv);
 		break;
 	case RE_UNEXPECTED_ERRNO:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("Recovery, unexpected errno (%d) on server %s\n",
+                    ep->re_uint, msg_srv);
 		break;
 	case RE_UNEXPECTED_STATUS:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("Recovery, unexpected NFS status code (%s) "
+		    "on server %s\n",
+		    nfs4_stat_str(ep->re_stat4), msg_srv);
 		break;
 	case RE_WRONGSEC:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("Recovery, can't recover from NFS4ERR_WRONGSEC."
+		    " error %d for mount %s server %s: rnode_pt1 %s (0x%p)"
+		    " rnode_pt2 %s (0x%p)", ep->re_uint, msg_mntpt, msg_srv,
+		    ep->re_char1, (void *)ep->re_rp1, ep->re_char2,
+		    (void *)ep->re_rp2);
 		break;
 	case RE_LOST_STATE_BAD_OP:
-		/* TODO */
-		mdb_printf("??");
+		mdb_printf("NFS lost state with unrecognized op (%d)."
+		    " fs %s, server %s, pid %d, file %s (rnode_pt: 0x%p), "
+		    "dir %s (0x%p)", ep->re_uint, msg_mntpt, msg_srv,
+		    ep->re_pid, ep->re_char1, (void *)ep->re_rp1,
+		    ep->re_char2, (void *)ep->re_rp2);
 		break;
 	case RE_REFERRAL:
-		/* TODO */
-		mdb_printf("??");
+		if (ep->re_char1)
+			mdb_printf("Referal, Server: %s on Mntpt: %s"
+			    "being referred from %s to %s", msg_srv,
+			    msg_mntpt, msg_srv, ep->re_char1);
+		else
+			mdb_printf("Referal, Server: %s on Mntpt: %s"
+			    "NFS4: being referred from %s to unknown server",
+			    msg_srv, msg_mntpt, msg->msg_srv);
 		break;
 	default:
-		mdb_printf("??");
+		mdb_printf("illegal event %d", ep->re_type);
 		break;
 	}
 }
@@ -1386,10 +1394,9 @@ nfs4_mimsg_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 void
 nfs4_mimsg_help(void)
 {
-	/* TODO */
 	mdb_printf(
-	    "-c       assumes client is Solaris NFSv4 Client\n"
-	    "-s       assumes server is Solaris NFSv4 Server\n"
+	    "-c       assumes client is NexentaStor NFSv4 Client\n"
+	    "-s       assumes server is NexentaStor NFSv4 Server\n"
 	    "\n"
 	    "The -c option enables the dcmd to decode the client generated\n"
 	    "structure CLIDtoSend that is normally opaque to the server.\n"
@@ -1457,7 +1464,7 @@ nfs4_oo_cb(uintptr_t addr, const void *data, void *varg)
 		mdb_warn("failed to read nfs4_open_onwer at %p", addr);
 		return (WALK_ERR);
 	}
-	mdb_printf("%p %p %d %d %d %d\n", addr, oop.oo_cred,
+	mdb_printf("%p %p %d %d %s %s\n", addr, oop.oo_cred,
 	    oop.oo_ref_count, oop.oo_seqid,
 	    oop.oo_just_created ? "True" : "False",
 	    oop.oo_seqid_inuse  ? "True" : "False");
@@ -1498,7 +1505,7 @@ nfs4_foo_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	mdb_printf("JustCre SeqInUse BadSeqid\n");
 
 	if (mdb_pwalk("list", nfs4_oo_cb, NULL, list_addr) == -1) {
-		mdb_warn("failed to walk 'nfs4_foo'");
+	    mdb_warn("failed to walk 'nfs4_foo'");
 		return (DCMD_ERR);
 	}
 	return (DCMD_OK);
@@ -1546,7 +1553,6 @@ nfs4_oob_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 /*
  * print out open stream entry
  */
-/* ARGUSED */
 int
 nfs4_openstream_print(uintptr_t addr, void *buf, int *opts)
 {
@@ -1642,7 +1648,7 @@ nfs4_os_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	if (!(flags & DCMD_ADDRSPEC)) {
 		if (mdb_walk("nfs_rtable4", (mdb_walk_cb_t)nfs4_openstreams_cb,
 		    &opts) == -1) {
-			mdb_warn("unable to walk nfs_rtable4\n");
+			mdb_warn("unable to walk nfs_rtable4");
 			return (DCMD_ERR);
 		}
 		return (DCMD_OK);
@@ -1709,7 +1715,7 @@ nfs_rtable_common_init(mdb_walk_state_t *wsp, const char *tabname,
 	}
 
 	if (rtsize < 0) {
-		mdb_warn("%s is negative: %d\n", sizename, rtsize);
+		mdb_warn("%s is negative: %d", sizename, rtsize);
 		return (WALK_ERR);
 	}
 
@@ -1728,7 +1734,7 @@ int
 nfs_rtable_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr != 0) {
-		mdb_warn("nfs_rtable supports only global walks\n");
+		mdb_warn("nfs_rtable supports only global walks");
 		return (WALK_ERR);
 	}
 
@@ -1754,7 +1760,7 @@ int
 nfs_rtable4_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr != 0) {
-		mdb_warn("nfs_rtable4 supports only global walks\n");
+		mdb_warn("nfs_rtable4 supports only global walks");
 		return (WALK_ERR);
 	}
 
@@ -1931,7 +1937,7 @@ int
 nfs_serv_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -1964,7 +1970,7 @@ int
 nfs4_serv_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -1997,7 +2003,7 @@ int
 nfs4_svnode_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2081,7 +2087,7 @@ int
 nfs_async_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2115,7 +2121,7 @@ int
 nfs4_async_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2151,7 +2157,7 @@ nfs_acache_rnode_walk_init(mdb_walk_state_t *wsp)
 	rnode_t rn;
 
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2208,7 +2214,7 @@ nfs_acache_walk_init(mdb_walk_state_t *wsp)
 	int status;
 
 	if (wsp->walk_addr != 0) {
-		mdb_warn("local walk not supported\n");
+		mdb_warn("local walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2218,7 +2224,7 @@ nfs_acache_walk_init(mdb_walk_state_t *wsp)
 	}
 
 	if (size < 0) {
-		mdb_warn("%s is negative: %d\n", "acachesize", size);
+		mdb_warn("%s is negative: %d", "acachesize", size);
 		return (WALK_ERR);
 	}
 
@@ -2258,7 +2264,7 @@ nfs_acache4_rnode_walk_init(mdb_walk_state_t *wsp)
 	rnode4_t rn;
 
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -2315,7 +2321,7 @@ nfs_acache4_walk_init(mdb_walk_state_t *wsp)
 	int status;
 
 	if (wsp->walk_addr != 0) {
-		mdb_warn("local walk not supported\n");
+		mdb_warn("local walk not supported");
 		return (WALK_ERR);
 	}
 

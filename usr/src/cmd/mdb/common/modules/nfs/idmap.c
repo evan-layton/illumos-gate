@@ -153,9 +153,6 @@ nfs4_idmap_walk_init(mdb_walk_state_t *wsp)
 		return (WALK_ERR);
 	}
 
-	/*
-	 * table=((struct nfsidmap_globals *)wsp->walk_addr)->CACHE_INFO.table
-	 */
 	if (mdb_vread(&table, sizeof (table), wsp->walk_addr
 	    + (uintptr_t)wsp->walk_arg + OFFSETOF(idmap_cache_info_t, table))
 	    == -1) {

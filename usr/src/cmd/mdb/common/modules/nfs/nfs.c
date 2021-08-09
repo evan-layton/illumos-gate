@@ -526,7 +526,6 @@ nfs_addr_by_conf(uintptr_t knconf, struct netbuf *addr,
 	}
 	/* Support only IPv4 addresses */
 	if (strcmp(NC_INET, buf) == 0) {
-		ssize_t sz;
 		struct sockaddr_in *in;
 
 		in = mdb_alloc(addr->len + 1, UM_SLEEP | UM_GC);
@@ -534,11 +533,9 @@ nfs_addr_by_conf(uintptr_t knconf, struct netbuf *addr,
 			return;
 
 		mdb_nhconvert(&in->sin_port, &in->sin_port,
-			sizeof (in->sin_port));
+		    sizeof (in->sin_port));
 
-		sz = 1 + mdb_snprintf(NULL, 0, "%I:%d", in->sin_addr.s_addr,
-		    in->sin_port);
-		(void) mdb_snprintf(s, sz, "%I:%d", in->sin_addr.s_addr,
+		(void) mdb_snprintf(s, nbytes, "%I:%d", in->sin_addr.s_addr,
 		    in->sin_port);
 	}
 }
@@ -589,7 +586,7 @@ nfs_queue_show_event(const nfs4_debug_msg_t *msg)
 {
 	const nfs4_revent_t *re;
 	time_t time;
-	char *re_char1 = "", *re_char2 = "";
+	char *re_char1 = "<unknown>", *re_char2 = "<unknown>";
 
 	re = &msg->rmsg_u.msg_event;
 	time = msg->msg_time.tv_sec;
@@ -679,7 +676,7 @@ nfs_queue_show_event(const nfs4_debug_msg_t *msg)
 	case RE_OPENS_CHANGED:
 		mdb_printf("[NFS4]%Y: The number of open files to reopen\n"
 		    "changed for mount %s mi %p old %d, new %d\n", time,
-		    re->re_mi, re->re_uint, re->re_pid);
+		    msg->msg_mntpt, re->re_mi, re->re_uint, re->re_pid);
 		break;
 	case RE_SIGLOST:
 	case RE_SIGLOST_NO_DUMP:
@@ -715,8 +712,8 @@ nfs_queue_show_event(const nfs4_debug_msg_t *msg)
 	case RE_LOST_STATE_BAD_OP:
 		mdb_printf("[NFS4]%Y: NFS lost state with unrecognized op %d\n"
 		    "fs %s, pid %d, file %s (rnode_pt: %p) dir %s (%p)\n",
-		    time, re->re_uint, re->re_pid, re_char1, re->re_rp1,
-		    re_char2, re->re_rp2);
+		    time, re->re_uint, msg->msg_mntpt, re->re_pid, re_char1,
+		    re->re_rp1, re_char2, re->re_rp2);
 		break;
 	case RE_REFERRAL:
 		mdb_printf("[NFS4]%Y: being referred to %s\n",
@@ -733,7 +730,7 @@ nfs_queue_show_fact(const nfs4_debug_msg_t *msg)
 {
 	time_t time;
 	const nfs4_rfact_t *rf;
-	char *rf_char1 = "";
+	char *rf_char1 = "<unknown>";
 
 	rf = &msg->rmsg_u.msg_fact;
 	time = msg->msg_time.tv_sec;
@@ -1072,7 +1069,7 @@ static void
 nfs4_diag_help(void)
 {
 	mdb_printf(" <mntinfo4_t>::nfs4_diag <-s>\n"
-	    "      -> assumes client is Solaris NFSv4 client\n");
+	    "      -> assumes client is NexentaStor NFSv4 client\n");
 }
 
 static int
@@ -1087,7 +1084,7 @@ nfs_rnode4_cb(uintptr_t addr, const void *data, void *arg)
 
 	vp = mdb_alloc(sizeof (*vp), UM_SLEEP | UM_GC);
 	if (mdb_vread(vp, sizeof (*vp), (uintptr_t)rp->r_vnode) == -1) {
-		mdb_warn("can't read vnode_t %p\n", (uintptr_t)rp->r_vnode);
+		mdb_warn("can't read vnode_t %p", (uintptr_t)rp->r_vnode);
 		return (WALK_ERR);
 	}
 
@@ -1130,7 +1127,7 @@ nfs_rnode4_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	/* address was specified */
 	rp = mdb_alloc(sizeof (*rp), UM_SLEEP | UM_GC);
 	if (mdb_vread(rp, sizeof (*rp), addr) == -1) {
-		mdb_warn("can't read rnode4_t\n");
+		mdb_warn("can't read rnode4_t");
 		return (DCMD_ERR);
 	}
 
@@ -1184,7 +1181,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"svc_pool", "?[-v] [poolid ...]",
 		"display SVCPOOL information\n"
-		"\tOptional address of SVCPOOL",
+		"\t\t\t(Optional address of SVCPOOL)",
 		svc_pool_dcmd, svc_pool_help
 	},
 	{
@@ -1196,7 +1193,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"rfs4_db", "?",
 		"dump NFSv4 server database\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		rfs4_db_dcmd
 	},
 	{
@@ -1217,43 +1214,43 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"rfs4_oo", "?",
 		"dump NFSv4 rfs4_openowner_t structures from bucket data\n"
-		"\tOptional address of rfs4_openowner_t",
+		"\t\t\t(Optional address of rfs4_openowner_t)",
 		rfs4_oo_dcmd
 	},
 	{
 		"rfs4_osid", "?[-v]",
 		"dump NFSv4 rfs4_state_t structures from bucket data\n"
-		"\tOptional address of rfs4_state_t",
+		"\t\t\t(Optional address of rfs4_state_t)",
 		rfs4_osid_dcmd
 	},
 	{
 		"rfs4_file", "?[-v]",
 		"dump NFSv4 rfs4_file_t structures from bucket data\n"
-		"\tOptional address of rfs4_file_t",
+		"\t\t\t(Optional address of rfs4_file_t)",
 		rfs4_file_dcmd
 	},
 	{
 		"rfs4_deleg", "?[-v]",
 		"dump NFSv4 rfs4_deleg_state_t structures from bucket data\n"
-		"\tOptional address of rfs4_deleg_state_t",
+		"\t\t\t(Optional address of rfs4_deleg_state_t)",
 		rfs4_deleg_dcmd
 	},
 	{
 		"rfs4_lo", "?",
 		"dump NFSv4 rfs4_lockowner_t structures from bucket data\n"
-		"\tOptional address of rfs4_lockowner_t",
+		"\t\t\t(Optional address of rfs4_lockowner_t)",
 		rfs4_lo_dcmd
 	},
 	{
 		"rfs4_lsid", "?[-v]",
 		"dump NFSv4 rfs4_lo_state_t structures from bucket data\n"
-		"\tOptional address of rfs4_lo_state_t",
+		"\t\t\t(Optional address of rfs4_lo_state_t)",
 		rfs4_lsid_dcmd
 	},
 	{
 		"rfs4_client", "?[-c <clientid>]",
 		"dump NFSv4 rfs4_client_t structures from bucket data\n"
-		"\tOptional address of rfs4_client_t",
+		"\t\t\t(Optional address of rfs4_client_t)",
 		rfs4_client_dcmd, rfs4_client_help
 	},
 	/* NFS server */
@@ -1270,19 +1267,19 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs_exptable", "?",
 		"dump exportinfo structures for a zone\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		nfs_exptable_dcmd
 	},
 	{
 		"nfs_exptable_path", "?",
 		"dump exportinfo structures for a zone\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		nfs_exptable_path_dcmd
 	},
 	{
 		"nfs_nstree", "?[-v]",
 		"dump NFS server pseudo namespace tree for a zone\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		nfs_nstree_dcmd, nfs_nstree_help
 	},
 	{
@@ -1304,14 +1301,14 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs4_idmap_info", "?[u2s | g2s | s2u | s2g ...]",
 		"dump NFSv4 idmap information\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		nfs4_idmap_info_dcmd, nfs4_idmap_info_help
 	},
 	/* NFS client */
 	{
 		"nfs_mntinfo", "?[-v]",
 		"print mntinfo_t information\n"
-		"\tOptional address of mntinfo_t",
+		"\t\t\t(Optional address of mntinfo_t)",
 		nfs_mntinfo_dcmd, nfs_mntinfo_help
 	},
 	{
@@ -1323,7 +1320,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs4_mntinfo", "?[-mv]",
 		"print mntinfo4_t information\n"
-		"\tOptional address of mntinfo4_t",
+		"\t\t\t(Optional address of mntinfo4_t)",
 		nfs4_mntinfo_dcmd, nfs4_mntinfo_help
 	},
 	{
@@ -1358,7 +1355,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs_vfs", "?[-v]",
 		"print all nfs vfs struct (-v for mntinfo)\n"
-		"\tOptional address of vfs_t",
+		"\t\t\t(Optional address of vfs_t)",
 		nfs_vfs_dcmd
 	},
 
@@ -1367,13 +1364,13 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs_rnode4", "?",
 		"dump NFSv4 rnodes\n"
-		"\tOptional address of rnode4_t",
+		"\t\t\t(Optional address of rnode4_t)",
 		nfs_rnode4_dcmd, nfs_rnode4_help
 	},
 	{
 		"nfs4_diag", "?[-s]",
 		"print queued recovery messages for NFSv4 client\n"
-		"\tOptional address of mntinfo4_t",
+		"\t\t\t(Optional address of mntinfo4_t)",
 		nfs4_diag_dcmd, nfs4_diag_help
 	},
 	{
@@ -1394,7 +1391,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs4_os", "?[-v]",
 		"dump open streams for NFSv4 Client\n"
-		"\tOptional address of rnode4_t",
+		"\t\t\t(Optional address of rnode4_t)",
 		nfs4_os_dcmd
 	},
 
@@ -1402,7 +1399,7 @@ static const mdb_dcmd_t dcmds[] = {
 	{
 		"nfs_stat", "?[-csb][-234][-anr] | $[count]",
 		"Print NFS statistics for zone\n"
-		"\tOptional address of zone_t",
+		"\t\t\t(Optional address of zone_t)",
 		nfs_stat_dcmd
 	},
 	{

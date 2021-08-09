@@ -17,10 +17,6 @@
 
 #include <sys/mdb_modapi.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int nfs_expvis_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern int nfs_expinfo_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern int nfs_exptable_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
@@ -47,8 +43,4 @@ extern int nfs_expvis_walk_step(mdb_walk_state_t *);
 extern int nfssrv_globals_walk_init(mdb_walk_state_t *);
 extern int nfssrv_globals_walk_step(mdb_walk_state_t *);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _NFSSRV_H_ */
+#endif	/* _NFSSRV_H */

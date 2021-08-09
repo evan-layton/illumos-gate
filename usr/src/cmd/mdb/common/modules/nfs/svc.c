@@ -81,7 +81,7 @@ svc_pool_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	if ((flags & DCMD_ADDRSPEC) == 0) {
 		/* Walk through all svcpools in the global zone */
 		if (mdb_walk_dcmd("svc_pool", "svc_pool", argc, argv) == -1) {
-			mdb_warn("failed to walk svcpools\n");
+			mdb_warn("failed to walk svcpools");
 			return (DCMD_ERR);
 		}
 		return (DCMD_OK);
@@ -205,7 +205,7 @@ svc_mxprt_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		/* Walk through all xprts */
 		if (mdb_pwalk_dcmd("svc_mxprt", "svc_mxprt", 0, NULL,
 		    addr) == -1) {
-			mdb_warn("failed to walk svc_mxprt\n");
+			mdb_warn("failed to walk svc_mxprt");
 			return (DCMD_ERR);
 		}
 		return (DCMD_OK);
@@ -309,7 +309,7 @@ int
 svc_mxprt_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 

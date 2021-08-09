@@ -17,10 +17,6 @@
 
 #include <mdb/mdb_modapi.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int svc_pool_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern void svc_pool_help(void);
 extern int svc_mxprt_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
@@ -31,8 +27,4 @@ extern int svc_pool_walk_step(mdb_walk_state_t *);
 extern int svc_mxprt_walk_init(mdb_walk_state_t *);
 extern int svc_mxprt_walk_step(mdb_walk_state_t *);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* SVC_H */
+#endif	/* _SVC_H */

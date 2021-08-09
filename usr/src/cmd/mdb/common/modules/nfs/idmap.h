@@ -17,10 +17,6 @@
 
 #include <sys/mdb_modapi.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int nfs4_idmap_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern int nfs4_idmap_info_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern void nfs4_idmap_info_help(void);
@@ -28,8 +24,4 @@ extern void nfs4_idmap_info_help(void);
 extern int nfs4_idmap_walk_init(mdb_walk_state_t *);
 extern void nfs4_idmap_walk_fini(mdb_walk_state_t *);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _IDMAP_H_ */
+#endif	/* _IDMAP_H */

@@ -21,10 +21,6 @@
 #include <rpc/svc.h>
 #include <nfs/nfs.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int zoned_zsd_find_by_key(uintptr_t, zone_key_t, uintptr_t *);
 extern int zoned_get_nfs_globals(uintptr_t, uintptr_t *);
 extern int zoned_get_zsd(uintptr_t, char *, uintptr_t *);
@@ -63,9 +59,5 @@ typedef struct hash_table_walk_arg {
 extern int hash_table_walk_init(mdb_walk_state_t *);
 extern int hash_table_walk_step(mdb_walk_state_t *);
 extern void hash_table_walk_fini(mdb_walk_state_t *);
-
-#ifdef	__cplusplus
-}
-#endif
 
 #endif	/* _COMMON_H */

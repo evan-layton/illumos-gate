@@ -17,10 +17,6 @@
 
 #include <sys/mdb_modapi.h>
 
-#ifdef	__cplusplus
-extern "C" {
-#endif
-
 extern int rfs4_db_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern int rfs4_tbl_dcmd(uintptr_t, uint_t, int, const mdb_arg_t *);
 extern void rfs4_tbl_help(void);
@@ -44,8 +40,4 @@ extern int rfs4_db_bkt_walk_init(mdb_walk_state_t *);
 extern int rfs4_db_bkt_walk_step(mdb_walk_state_t *);
 extern void rfs4_db_bkt_walk_fini(mdb_walk_state_t *);
 
-#ifdef	__cplusplus
-}
-#endif
-
-#endif	/* _RFS4_H_ */
+#endif	/* _RFS4_H */

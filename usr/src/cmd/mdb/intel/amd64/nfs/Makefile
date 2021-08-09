@@ -20,13 +20,11 @@ include ../../../../Makefile.cmd.64
 include ../../Makefile.amd64
 
 # To /usr/kernel/kmdb
-#ROOTKMOD = $(ROOT)/kernel/kmdb$(MACHMODDIR)
+ROOTKMOD = $(ROOT)/kernel/kmdb$(MACHMODDIR)
 
 include ../../../Makefile.module
 
 CPPFLAGS	+= -I$(SRC)/uts/common
 
 CSTD=   $(CSTD_GNU99)
-
-CERRWARN        += -_gcc=-Wno-type-limits
 

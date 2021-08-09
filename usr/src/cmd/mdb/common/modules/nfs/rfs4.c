@@ -42,7 +42,7 @@ rfs4_db_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	} else {
 		if (mdb_readsym(&zonep, sizeof (uintptr_t),
 		    "global_zone") == -1) {
-			mdb_warn("Failed to find global_zone\n");
+			mdb_warn("Failed to find global_zone");
 			return (DCMD_ERR);
 		}
 	}
@@ -71,7 +71,7 @@ rfs4_db_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 	if (mdb_pwalk_dcmd("rfs4_db_tbl", "rfs4_tbl", 0, NULL,
 	    (uintptr_t)rfs4_db.db_tables) == -1) {
-		mdb_warn("failed to walk tables\n");
+		mdb_warn("failed to walk tables");
 		return (DCMD_ERR);
 	}
 
@@ -229,7 +229,7 @@ rfs4_idx_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		/* Walk through all tables */
 		if (mdb_pwalk_dcmd("rfs4_db_idx", "rfs4_idx", 0, NULL, addr)
 		    == -1) {
-			mdb_warn("failed to walk indices\n");
+			mdb_warn("failed to walk indices");
 			return (DCMD_ERR);
 		}
 		return (DCMD_OK);
@@ -316,7 +316,7 @@ rfs4_bkt_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	}
 
 	if (mdb_pwalk("rfs4_db_bkt", rfs4_print_bkt_cb, NULL, addr) == -1) {
-		mdb_warn("bucket walking failed\n");
+		mdb_warn("bucket walking failed");
 		return (DCMD_ERR);
 	}
 
@@ -1068,7 +1068,7 @@ int
 rfs4_db_tbl_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("db tbl global walk not supported\n");
+		mdb_warn("db tbl global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -1101,7 +1101,7 @@ int
 rfs4_db_idx_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("db idx global walk not supported\n");
+		mdb_warn("db idx global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -1136,7 +1136,7 @@ rfs4_db_bkt_walk_init(mdb_walk_state_t *wsp)
 	uint32_t dbt_len;
 
 	if (wsp->walk_addr == 0) {
-		mdb_warn("db bkt global walk not supported\n");
+		mdb_warn("db bkt global walk not supported");
 		return (WALK_ERR);
 	}
 

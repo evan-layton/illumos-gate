@@ -19,7 +19,6 @@
 #include <nfs/nfs_clnt.h>
 #include <nfs/nfs4_clnt.h>
 
-/* I'm not sure yet if thse will be needed */
 #include "svc.h"
 #include "rfs4.h"
 #include "nfssrv.h"
@@ -94,7 +93,7 @@ nfs_stat_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		int i;
 		for (i = argv->a_un.a_val; i; i--) {
 			if (mdb_vread(&ksts, sizeof (ksts), addr) < 0) {
-				mdb_warn("failed to read kstat_name_t\n");
+				mdb_warn("failed to read kstat_name_t");
 				return (DCMD_ERR);
 			}
 			mdb_printf(" %8s %30d\n", ksts.name, ksts.value.ui64);
@@ -123,13 +122,13 @@ nfs_stat_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	} else {
 		if (mdb_readsym(&zonep, sizeof (uintptr_t),
 		    "global_zone") == -1) {
-			mdb_warn("Failed to find global_zone\n");
+			mdb_warn("Failed to find global_zone");
 			return (DCMD_ERR);
 		}
 	}
 
 	if (zoned_get_zsd(zonep, "nfssrv_zone_key", &glbls)) {
-		mdb_warn("Failed to find %s", "nfssrv_zone_key");
+		mdb_warn("Failed to find nfssrv_zone_key");
 		return (DCMD_ERR);
 	}
 
@@ -346,7 +345,7 @@ nfs_clntstat(nfs_mdb_stats_t *stptr, int flags)
 		mdb_printf("Version 3\n");
 		if (prt_nfs_stats(
 		    (uintptr_t)stptr->nfsstats.nfs_stats_v3.rfsreqcnt_ptr,
-		    "rfsreqcnt_v2_tmpl"))
+		    "rfsreqcnt_v3_tmpl"))
 			return (-1);
 	}
 	if (flags & NFS_V4_STAT) {
@@ -356,7 +355,7 @@ nfs_clntstat(nfs_mdb_stats_t *stptr, int flags)
 		mdb_printf("Version 4\n");
 		if (prt_nfs_stats(
 		    (uintptr_t)stptr->nfsstats.nfs_stats_v4.rfsreqcnt_ptr,
-		    "rfsreqcnt_v2_tmpl"))
+		    "rfsreqcnt_v4_tmpl"))
 			return (-1);
 	}
 	return (0);
@@ -425,7 +424,7 @@ prt_nfs_stats(uintptr_t addr, char *name)
 
 
 	if (mdb_lookup_by_name(name, &sym) != 0) {
-		mdb_warn("failed to find %s\n", name);
+		mdb_warn("failed to find %s", name);
 		return (1);
 	}
 

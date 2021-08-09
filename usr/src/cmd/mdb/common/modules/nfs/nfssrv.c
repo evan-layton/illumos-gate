@@ -31,7 +31,7 @@ static const mdb_bitmask_t sec_flag_bits[] = {
 	{"M_RWL", M_RWL, M_RWL},
 	{"M_ROOT", M_ROOT, M_ROOT},
 	{"M_EXP", M_4SEC_EXPORTED, M_4SEC_EXPORTED},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 static int
@@ -155,7 +155,7 @@ static const mdb_bitmask_t exp_flag_bits[] = {
 	{"EX_LOG", EX_LOG, EX_LOG},
 	{"EX_LOG_ALLOPS", EX_LOG_ALLOPS, EX_LOG_ALLOPS},
 	{"EX_PSEUDO", EX_PSEUDO, EX_PSEUDO},
-	{NULL}
+	{NULL, 0, 0}
 };
 
 int
@@ -216,7 +216,7 @@ nfs_expinfo_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		mdb_inc_indent(4);
 
 		if (mdb_pwalk_dcmd("nfs_expvis", "nfs_expvis", 0, NULL,
-			    (uintptr_t)exi.exi_visible) == -1) {
+		    (uintptr_t)exi.exi_visible) == -1) {
 			mdb_warn("walk through exi_visible failed");
 			return (DCMD_ERR);
 		}
@@ -248,7 +248,7 @@ nfs_exptable_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	} else {
 		if (mdb_readsym(
 		    &zonep, sizeof (uintptr_t), "global_zone") == -1) {
-			mdb_warn("Failed to find global_zone\n");
+			mdb_warn("Failed to find global_zone");
 			return (DCMD_ERR);
 		}
 	}
@@ -266,7 +266,7 @@ nfs_exptable_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 		return (DCMD_ERR);
 	}
 	mdb_printf("The nfs globals are %p\n", nfsglbls);
-	mdb_printf("The addess of nfsglbls.nfs_export is %p\n",
+	mdb_printf("The address of nfsglbls.nfs_export is %p\n",
 	    nfsglbls.nfs_export);
 	mdb_printf("The exptable address is %p\n",
 	    nfsglbls.nfs_export->exptable);
@@ -300,7 +300,7 @@ nfs_exptable_path_dcmd(uintptr_t addr, uint_t flags, int argc,
 	} else {
 		if (mdb_readsym(&zonep, sizeof (uintptr_t),
 		    "global_zone") == -1) {
-			mdb_warn("Failed to find global_zone\n");
+			mdb_warn("Failed to find global_zone");
 			return (DCMD_ERR);
 		}
 	}
@@ -426,7 +426,7 @@ nfs_nstree_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	} else {
 		if (mdb_readsym(&zonep, sizeof (uintptr_t),
 		    "global_zone") == -1) {
-			mdb_warn("Failed to find global_zone\n");
+			mdb_warn("Failed to find global_zone");
 			return (DCMD_ERR);
 		}
 	}
@@ -582,7 +582,7 @@ nfs_expinfo_walk_init(mdb_walk_state_t *wsp)
 	int status;
 
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 
@@ -590,7 +590,7 @@ nfs_expinfo_walk_init(mdb_walk_state_t *wsp)
 	arg->array_addr = wsp->walk_addr;
 	arg->array_len = exp_arg->size;
 	arg->head_size = sizeof (struct exportinfo *);
-	arg->first_name = "exportinfo pointer",
+	arg->first_name = "exportinfo pointer";
 	arg->first_offset = 0;
 	arg->member_type_name = "struct exportinfo";
 	arg->member_size = sizeof (struct exportinfo);
@@ -619,7 +619,7 @@ int
 nfs_expvis_walk_init(mdb_walk_state_t *wsp)
 {
 	if (wsp->walk_addr == 0) {
-		mdb_warn("global walk not supported\n");
+		mdb_warn("global walk not supported");
 		return (WALK_ERR);
 	}
 

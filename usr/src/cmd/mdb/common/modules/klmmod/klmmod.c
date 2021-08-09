@@ -44,7 +44,7 @@
 static int
 nlm_netbuf_str(char *buf, size_t bufsz, const struct netbuf *nb)
 {
-	struct sockaddr sa;
+	struct sockaddr_storage sa;
 	struct sockaddr_in *s_in;
 	struct sockaddr_in6 *s_in6;
 	uint_t salen = nb->len;
@@ -57,7 +57,7 @@ nlm_netbuf_str(char *buf, size_t bufsz, const struct netbuf *nb)
 	if (mdb_vread(&sa, salen, (uintptr_t)nb->buf) < 0)
 		return (-1);
 
-	switch (sa.sa_family) {
+	switch (sa.ss_family) {
 	case AF_INET:
 		s_in = (struct sockaddr_in *)(void *)&sa;
 		mdb_nhconvert(&port, &s_in->sin_port, sizeof (port));
@@ -73,7 +73,7 @@ nlm_netbuf_str(char *buf, size_t bufsz, const struct netbuf *nb)
 		break;
 
 	default:
-		mdb_printf("AF_%d", sa.sa_family);
+		mdb_printf("AF_%d", sa.ss_family);
 		break;
 	}
 
@@ -101,7 +101,7 @@ get_enum(char *obuf, size_t size, const char *type_str, int val,
 		if (strncmp(cp, prefix, len) == 0)
 			cp += len;
 	}
-	(void) strncpy(obuf, cp, size);
+	(void) strlcpy(obuf, cp, size);
 	return;
 
 errout:
@@ -784,9 +784,9 @@ nlm_list_host_cb(uintptr_t addr, const void *data, void *cb_data)
 	/* Get the host name and net addr. */
 	if (mdb_readstr(arg->namebuf, NLM_MAXNAMELEN,
 	    (uintptr_t)nh->nh_name) < 0)
-		strlcpy(arg->namebuf, "?", NLM_MAXNAMELEN);
+		(void) strlcpy(arg->namebuf, "?", sizeof (char));
 	if (nlm_netbuf_str(arg->addrbuf, NLM_MAXADDRSTR, &nh->nh_addr) < 0)
-		strlcpy(arg->addrbuf, "?", NLM_MAXADDRSTR);
+		(void) strlcpy(arg->addrbuf, "?", sizeof (char));
 
 	/* Filter out uninteresting hosts */
 	if (arg->opt_a == 0 && nh->nh_refs == 0)
@@ -981,9 +981,9 @@ nlm_locks_host_cb(uintptr_t addr, const void *data, void *cb_data)
 	/* Get the host name and net addr. */
 	if (mdb_readstr(arg->namebuf, NLM_MAXNAMELEN,
 	    (uintptr_t)nh->nh_name) < 0)
-		strlcpy(arg->namebuf, "?", NLM_MAXNAMELEN);
+		(void) strlcpy(arg->namebuf, "?", sizeof (char));
 	if (nlm_netbuf_str(arg->addrbuf, NLM_MAXADDRSTR, &nh->nh_addr) < 0)
-		strlcpy(arg->addrbuf, "?", NLM_MAXADDRSTR);
+		(void) strlcpy(arg->addrbuf, "?", sizeof (char));
 
 	/* Filter out uninteresting hosts */
 	if (arg->sysid != -1 && arg->sysid != (nh->nh_sysid & LM_SYSID_MAX))
@@ -1011,13 +1011,6 @@ nlm_locks_host_cb(uintptr_t addr, const void *data, void *cb_data)
 	return (WALK_NEXT);
 }
 
-void
-nlm_lockson_debug(uintptr_t addr,
-    const lock_descriptor_t *ld,
-    struct nlm_locks_arg *arg)
-{
-}
-
 static int
 nlm_lockson_cb(uintptr_t addr, const void *data, void *cb_data)
 {
@@ -1033,8 +1026,6 @@ nlm_lockson_cb(uintptr_t addr, const void *data, void *cb_data)
 
 	if (arg->lg_sysid != sysid)
 		return (WALK_NEXT);
-
-	nlm_lockson_debug(addr, ld, arg);
 
 	if (DCMD_HDRSPEC(arg->flags)) {
 		mdb_printf("%<b>%<u>%-?s %-*s %5s(x) %-?s %-6s %-*s %-*s type",
