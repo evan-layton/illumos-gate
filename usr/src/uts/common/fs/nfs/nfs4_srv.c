@@ -30,8 +30,7 @@
 
 /*
  * Copyright (c) 2012, 2016 by Delphix. All rights reserved.
- * Copyright 2019 Nexenta Systems, Inc.
- * Copyright 2019 Nexenta by DDN, Inc.
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
  * Copyright 2020 RackTop Systems, Inc.
  */
 
@@ -4117,11 +4116,11 @@ rfs4_op_release_lockowner(nfs_argop4 *argop, nfs_resop4 *resop,
 	    cs, RELEASE_LOCKOWNER4args *, ap);
 
 	/* Make sure there is a clientid around for this request */
-	cp = rfs4_findclient_by_id(ap->lock_owner.clientid, FALSE);
+	cp = rfs4_findclient_by_id(ap->lock_owner.clientid, req, FALSE);
 
 	if (cp == NULL) {
 		*cs->statusp = resp->status =
-		    rfs4_check_clientid(&ap->lock_owner.clientid, 0);
+		    rfs4_check_clientid(&ap->lock_owner.clientid, req, 0);
 		goto out;
 	}
 	rfs4_client_rele(cp);
@@ -5009,9 +5008,10 @@ rfs4_op_renew(nfs_argop4 *argop, nfs_resop4 *resop, struct svc_req *req,
 	DTRACE_NFSV4_2(op__renew__start, struct compound_state *, cs,
 	    RENEW4args *, args);
 
-	if ((cp = rfs4_findclient_by_id(args->clientid, FALSE)) == NULL) {
+	if ((cp = rfs4_findclient_by_id(args->clientid, req,
+	    FALSE)) == NULL) {
 		*cs->statusp = resp->status =
-		    rfs4_check_clientid(&args->clientid, 0);
+		    rfs4_check_clientid(&args->clientid, req, 0);
 		goto out;
 	}
 
@@ -7656,10 +7656,10 @@ rfs4_op_open(nfs_argop4 *argop, nfs_resop4 *resop,
 	 * Need to check clientid and lease expiration first based on
 	 * error ordering and incrementing sequence id.
 	 */
-	cp = rfs4_findclient_by_id(owner->clientid, FALSE);
+	cp = rfs4_findclient_by_id(owner->clientid, req, FALSE);
 	if (cp == NULL) {
 		*cs->statusp = resp->status =
-		    rfs4_check_clientid(&owner->clientid, 0);
+		    rfs4_check_clientid(&owner->clientid, req, 0);
 		goto end;
 	}
 
@@ -8602,11 +8602,11 @@ rfs4_op_setclientid_confirm(nfs_argop4 *argop, nfs_resop4 *resop,
 	nsrv4 = nfs4_get_srv();
 	*cs->statusp = res->status = NFS4_OK;
 
-	cp = rfs4_findclient_by_id(args->clientid, TRUE);
+	cp = rfs4_findclient_by_id(args->clientid, req, TRUE);
 
 	if (cp == NULL) {
 		*cs->statusp = res->status =
-		    rfs4_check_clientid(&args->clientid, 1);
+		    rfs4_check_clientid(&args->clientid, req, 1);
 		goto out;
 	}
 
@@ -9874,10 +9874,10 @@ rfs4_op_lockt(nfs_argop4 *argop, nfs_resop4 *resop,
 	 * Check out the clientid to ensure the server knows about it
 	 * so that we correctly inform the client of a server reboot.
 	 */
-	if ((cp = rfs4_findclient_by_id(args->owner.clientid, FALSE))
+	if ((cp = rfs4_findclient_by_id(args->owner.clientid, req, FALSE))
 	    == NULL) {
 		*cs->statusp = resp->status =
-		    rfs4_check_clientid(&args->owner.clientid, 0);
+		    rfs4_check_clientid(&args->owner.clientid, req, 0);
 		goto out;
 	}
 	if (rfs4_lease_expired(cp)) {

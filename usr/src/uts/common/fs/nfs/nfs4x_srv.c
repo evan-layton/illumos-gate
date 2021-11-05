@@ -632,7 +632,7 @@ rfs4x_op_create_session(nfs_argop4 *argop, nfs_resop4 *resop,
 	/*
 	 * Find the clientid
 	 */
-	cp = rfs4_findclient_by_id(args->csa_clientid, TRUE);
+	cp = rfs4_findclient_by_id(args->csa_clientid, req, TRUE);
 	if (cp == NULL) {
 		status = NFS4ERR_STALE_CLIENTID;
 		goto out;
@@ -867,7 +867,7 @@ ping_cb_null_thr(rfs4_session_t *sp)
 	CLIENT			*ch = NULL;
 	struct timeval		 tv;
 	enum clnt_stat		 cs;
-	int 			conn_num, attempts = 5;
+	int			conn_num, attempts = 5;
 
 	tv.tv_sec = 30;
 	tv.tv_usec = 0;
@@ -1300,7 +1300,7 @@ rfs4x_op_destroy_clientid(nfs_argop4 *argop, nfs_resop4 *resop,
 	    struct compound_state *, cs,
 	    DESTROY_CLIENTID4args *, args);
 
-	cp = rfs4_findclient_by_id(args->dca_clientid, TRUE);
+	cp = rfs4_findclient_by_id(args->dca_clientid, req, TRUE);
 	if (cp == NULL) {
 		status = NFS4ERR_STALE_CLIENTID;
 		goto end;
@@ -1618,7 +1618,7 @@ rfs4x_op_backchannel_ctl(nfs_argop4 *argop, nfs_resop4 *resop,
 	rfs4_session_t		*sp = cs->sp;
 	nfsstat4		status = NFS4_OK;
 	BACKCHANNEL_CTL4args	*args = &argop->nfs_argop4_u.opbackchannel_ctl;
-	BACKCHANNEL_CTL4res 	*resp = &resop->nfs_resop4_u.opbackchannel_ctl;
+	BACKCHANNEL_CTL4res	*resp = &resop->nfs_resop4_u.opbackchannel_ctl;
 
 	ASSERT(sp != NULL);
 

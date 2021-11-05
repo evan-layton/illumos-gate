@@ -25,8 +25,7 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.
- * Copyright 2019 Nexenta by DDN, Inc.
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
  */
 
 #ifndef _NFS4_H
@@ -921,7 +920,7 @@ extern void		rfs4_grace_start_new(nfs4_srv_t *);
 extern void		rfs4_grace_reset_all(nfs4_srv_t *);
 extern void		rfs4_ss_oldstate(rfs4_oldstate_t *, char *, char *);
 extern void		rfs4_dss_readstate(nfs4_srv_t *, int, char **);
-extern rfs4_session_t 	*rfs4x_findsession_by_clid(clientid4);
+extern rfs4_session_t	*rfs4x_findsession_by_clid(clientid4);
 extern rfs4_cbstate_t	rfs4x_cbcheck(rfs4_state_t *);
 extern rfs4_cbstate_t	rfs4_cbcheck(rfs4_state_t *);
 
@@ -935,7 +934,8 @@ extern	void		rfs4_copy_reply(nfs_resop4 *, nfs_resop4 *);
 /* rfs4_client_t handling */
 extern	rfs4_client_t	*rfs4_findclient(nfs_client_id4 *,
 					bool_t *, rfs4_client_t *);
-extern	rfs4_client_t	*rfs4_findclient_by_id(clientid4, bool_t);
+extern	rfs4_client_t	*rfs4_findclient_by_id(clientid4,
+					struct svc_req *, bool_t);
 extern	rfs4_client_t	*rfs4_findclient_by_addr(struct sockaddr *);
 extern	void		rfs4_client_rele(rfs4_client_t *);
 extern	void		rfs4_client_close(rfs4_client_t *);
@@ -943,7 +943,8 @@ extern	void		rfs4_client_state_remove(rfs4_client_t *);
 extern	void		rfs4_client_scv_next(rfs4_client_t *);
 extern	void		rfs4_update_lease(rfs4_client_t *);
 extern	bool_t		rfs4_lease_expired(rfs4_client_t *);
-extern	nfsstat4	rfs4_check_clientid(clientid4 *, int);
+extern	nfsstat4	rfs4_check_clientid(clientid4 *,
+					struct svc_req *, int);
 
 /* rfs4_clntip_t handling */
 extern	rfs4_clntip_t	*rfs4_find_clntip(struct sockaddr *, bool_t *);

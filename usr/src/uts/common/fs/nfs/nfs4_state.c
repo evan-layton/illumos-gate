@@ -24,8 +24,7 @@
  */
 
 /*
- * Copyright 2018 Nexenta Systems, Inc.
- * Copyright 2019 Nexenta by DDN, Inc.
+ * Copyright 2021 Tintri by DDN, Inc. All rights reserved.
  * Copyright 2020 RackTop Systems, Inc.
  */
 
@@ -84,9 +83,9 @@ const stateid4 nfs4_invalid_sid = {
 	{ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 }
 };
 
-/* For embedding the cluster nodeid into our clientid */
-#define	CLUSTER_NODEID_SHIFT	24
-#define	CLUSTER_MAX_NODEID	255
+/* For embedding the cluster resource group id into our clientid */
+#define	CLUSTER_RESGRPID_SHIFT	24
+#define	CLUSTER_MAX_RESGRPID	255
 
 #ifdef DEBUG
 int rfs4_debug;
@@ -1622,8 +1621,7 @@ typedef union {
 } cid;
 
 static int foreign_stateid(stateid_t *id);
-static int foreign_clientid(cid *cidp);
-static void embed_nodeid(cid *cidp);
+static bool_t foreign_clientid(cid *cidp, struct svc_req *req);
 
 typedef union {
 	struct {
@@ -1690,7 +1688,8 @@ nfsclnt_compare(rfs4_entry_t entry, void *key)
 	if (!(cluster_bootflags & CLUSTER_BOOTED))
 		return (TRUE);
 
-	if ((cidp->impl_id.c_id >> CLUSTER_NODEID_SHIFT) == nfs_client->res_grp)
+	if ((cidp->impl_id.c_id >> CLUSTER_RESGRPID_SHIFT) ==
+	    nfs_client->res_grp)
 		return (TRUE);
 
 	return (FALSE);
@@ -1834,7 +1833,8 @@ rfs4_client_create(rfs4_entry_t u_entry, void *arg)
 
 	/* If we are booted as a cluster node, embed our resgrp id */
 	if (cluster_bootflags & CLUSTER_BOOTED)
-		cidp->impl_id.c_id |= (client->res_grp << CLUSTER_NODEID_SHIFT);
+		cidp->impl_id.c_id |=
+		    (client->res_grp << CLUSTER_RESGRPID_SHIFT);
 
 	/* Allocate and copy client's client id value */
 	cp->rc_nfs_client.id_val = kmem_alloc(client->id_len, KM_SLEEP);
@@ -1952,15 +1952,19 @@ rfs4_findclient(nfs_client_id4 *client, bool_t *create,	rfs4_client_t *oldcp)
 }
 
 rfs4_client_t *
-rfs4_findclient_by_id(clientid4 clientid, bool_t find_unconfirmed)
+rfs4_findclient_by_id(clientid4 clientid, struct svc_req *req,
+    bool_t find_unconfirmed)
 {
 	rfs4_client_t *cp;
 	bool_t create = FALSE;
 	cid *cidp = (cid *)&clientid;
 	nfs4_srv_t *nsrv4 = nfs4_get_srv();
 
-	/* If we're a cluster and the nodeid isn't right, short-circuit */
-	if (cluster_bootflags & CLUSTER_BOOTED && foreign_clientid(cidp))
+	/*
+	 * If we're a cluster and the resource group id isn't correct,
+	 * short-circuit
+	 */
+	if ((cluster_bootflags & CLUSTER_BOOTED) && foreign_clientid(cidp, req))
 		return (NULL);
 
 	rw_enter(&nsrv4->rfs4_findclient_lock, RW_READER);
@@ -2762,7 +2766,7 @@ rfs4_lo_state_destroy(rfs4_entry_t u_entry)
 			if (lm_remove_file_locks != NULL) {
 				int new_sysid;
 
-				/* Encode the cluster nodeid in new sysid */
+				/* Encode the resource group id in new sysid */
 				new_sysid =
 				    lsp->rls_locker->rl_client->rc_sysidt;
 				lm_set_nlmid_flk(&new_sysid);
@@ -2929,15 +2933,21 @@ foreign_stateid(stateid_t *id)
 
 /*
  * For use only when booted as a cluster node.
- * Returns TRUE if the embedded nodeid indicates that this clientid was
- * generated on another node.
+ * Returns TRUE if the embedded resource group id indicates that this
+ * clientid was generated using another resource group.
  */
-static int
-foreign_clientid(cid *cidp)
+static bool_t
+foreign_clientid(cid *cidp, struct svc_req *req)
 {
+	char sbuf[INET6_ADDRSTRLEN] = {0};
+	char *srv_addr;
+	int res_grp;
+
+	srv_addr = nfs_local_addr(req, sbuf);
+	res_grp = get_res_grp_id(srv_addr);
+
 	ASSERT(cluster_bootflags & CLUSTER_BOOTED);
-	return (cidp->impl_id.c_id >> CLUSTER_NODEID_SHIFT !=
-	    (uint32_t)clconf_get_nodeid());
+	return (cidp->impl_id.c_id >> CLUSTER_RESGRPID_SHIFT != res_grp);
 }
 
 static uint32_t
@@ -3406,7 +3416,7 @@ rfs4_client_close(rfs4_client_t *cp)
 }
 
 nfsstat4
-rfs4_check_clientid(clientid4 *cp, int setclid_confirm)
+rfs4_check_clientid(clientid4 *cp, struct svc_req *req, int setclid_confirm)
 {
 	cid *cidp = (cid *) cp;
 	nfs4_srv_t *nsrv4;
@@ -3414,11 +3424,11 @@ rfs4_check_clientid(clientid4 *cp, int setclid_confirm)
 	nsrv4 = nfs4_get_srv();
 
 	/*
-	 * If we are booted as a cluster node, check the embedded nodeid.
-	 * If it indicates that this clientid was generated on another node,
-	 * inform the client accordingly.
+	 * If we are booted as a cluster node, check the embedded resource
+	 * group id. If it indicates that this clientid was generated on
+	 * another node, inform the client accordingly.
 	 */
-	if (cluster_bootflags & CLUSTER_BOOTED && foreign_clientid(cidp))
+	if ((cluster_bootflags & CLUSTER_BOOTED) && foreign_clientid(cidp, req))
 		return (NFS4ERR_STALE_CLIENTID);
 
 	/*
