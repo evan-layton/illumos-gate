@@ -18,10 +18,6 @@ MODSRCS		= nfs.c svc.c rfs4.c nfssrv.c idmap.c nfs_clnt.c common.c nfs_stat.c
 include ../../../../Makefile.cmd
 include ../../../../Makefile.cmd.64
 include ../../Makefile.amd64
-
-# To /usr/kernel/kmdb
-ROOTKMOD = $(ROOT)/kernel/kmdb$(MACHMODDIR)
-
 include ../../../Makefile.module
 
 CPPFLAGS	+= -I$(SRC)/uts/common

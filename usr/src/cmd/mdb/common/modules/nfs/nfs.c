@@ -1069,7 +1069,7 @@ static void
 nfs4_diag_help(void)
 {
 	mdb_printf(" <mntinfo4_t>::nfs4_diag <-s>\n"
-	    "      -> assumes client is NexentaStor NFSv4 client\n");
+	    "      -> assumes client is Illumos NFSv4 client\n");
 }
 
 static int

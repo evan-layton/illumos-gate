@@ -150,7 +150,7 @@ static const struct {
 	TBL_ENTRY(NR_LOST_STATE_RQST),
 	TBL_ENTRY(NR_STALE),
 	TBL_ENTRY(NR_MOVED),
-	NULL
+	{NULL}
 };
 
 static const char *
@@ -234,7 +234,8 @@ static const struct {
 	TBL_ENTRY(NFS4ERR_DEADLOCK),
 	TBL_ENTRY(NFS4ERR_FILE_OPEN),
 	TBL_ENTRY(NFS4ERR_ADMIN_REVOKED),
-	TBL_ENTRY(NFS4ERR_CB_PATH_DOWN)
+	TBL_ENTRY(NFS4ERR_CB_PATH_DOWN),
+	{NULL}
 };
 
 static const char *
@@ -1021,8 +1022,8 @@ void
 nfs4_server_info_help(void)
 {
 	mdb_printf(
-	    "-c       assumes client is NexentaStor NFSv4 Client\n"
-	    "-s       assumes server is NexentaStor NFSv4 Server\n"
+	    "-c       assumes client is Illumos NFSv4 Client\n"
+	    "-s       assumes server is Illumos NFSv4 Server\n"
 	    "\n"
 	    "The -c option enables the dcmd to decode the client generated\n"
 	    "structure CLIDtoSend that is normally opaque to the server.\n"
@@ -1395,8 +1396,8 @@ void
 nfs4_mimsg_help(void)
 {
 	mdb_printf(
-	    "-c       assumes client is NexentaStor NFSv4 Client\n"
-	    "-s       assumes server is NexentaStor NFSv4 Server\n"
+	    "-c       assumes client is Illumos NFSv4 Client\n"
+	    "-s       assumes server is Illumos NFSv4 Server\n"
 	    "\n"
 	    "The -c option enables the dcmd to decode the client generated\n"
 	    "structure CLIDtoSend that is normally opaque to the server.\n"
@@ -1505,7 +1506,7 @@ nfs4_foo_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 	mdb_printf("JustCre SeqInUse BadSeqid\n");
 
 	if (mdb_pwalk("list", nfs4_oo_cb, NULL, list_addr) == -1) {
-	    mdb_warn("failed to walk 'nfs4_foo'");
+		mdb_warn("failed to walk 'nfs4_foo'");
 		return (DCMD_ERR);
 	}
 	return (DCMD_OK);
@@ -1542,7 +1543,6 @@ nfs4_oob_dcmd(uintptr_t addr, uint_t flags, int argc, const mdb_arg_t *argv)
 
 		if (mdb_pwalk("list", nfs4_oo_cb, NULL, list_inst) == -1) {
 			mdb_warn("failed to walk 'nfs4_oob'");
-			mdb_printf("failed to walk 'nfs4_foo'");
 			return (DCMD_ERR);
 		}
 	}
